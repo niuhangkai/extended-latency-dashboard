@@ -131,6 +131,12 @@ p {
   font-weight: 800;
 }
 
+.window-note {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .metric.good {
   color: var(--green);
 }

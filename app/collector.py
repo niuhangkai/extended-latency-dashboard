@@ -149,7 +149,7 @@ class MexcLatencyCollector:
                             "symbol": self.settings.symbol,
                             "severity": "info",
                             "type": "connect",
-                            "message": f"{stream} connected in {connect_ms:.2f} ms",
+                            "message": f"{stream} 连接成功，耗时 {connect_ms:.2f} ms",
                             "extra": {"channel": channel, "connect_ms": rounded(connect_ms)},
                         }
                     )
@@ -173,7 +173,7 @@ class MexcLatencyCollector:
                                     "symbol": self.settings.symbol,
                                     "severity": "warning",
                                     "type": "timeout",
-                                    "message": f"{stream} no message for 10s",
+                                    "message": f"{stream} 10 秒内没有收到消息",
                                     "extra": {"channel": channel},
                                 }
                             )
@@ -224,7 +224,7 @@ class MexcLatencyCollector:
                                         "symbol": self.settings.symbol,
                                         "severity": "warning",
                                         "type": "gap_spike",
-                                        "message": f"{stream} max gap {sample['max_ms']:.2f} ms",
+                                        "message": f"{stream} 最大消息间隔 {sample['max_ms']:.2f} ms",
                                         "extra": sample,
                                     }
                                 )
@@ -268,7 +268,7 @@ class MexcLatencyCollector:
                             "symbol": None,
                             "severity": "info",
                             "type": "connect",
-                            "message": f"contract WS connected in {connect_ms:.2f} ms",
+                            "message": f"合约 WebSocket 连接成功，耗时 {connect_ms:.2f} ms",
                             "extra": {"connect_ms": rounded(connect_ms)},
                         }
                     )
@@ -288,7 +288,7 @@ class MexcLatencyCollector:
                                     "symbol": None,
                                     "severity": "warning",
                                     "type": "timeout",
-                                    "message": "contract ping no pong for 5s",
+                                    "message": "合约 ping 5 秒内没有收到 pong",
                                     "extra": {},
                                 }
                             )
@@ -321,7 +321,7 @@ class MexcLatencyCollector:
                                         "symbol": None,
                                         "severity": "warning",
                                         "type": "rtt_spike",
-                                        "message": f"contract ping max RTT {sample['max_ms']:.2f} ms",
+                                        "message": f"合约 ping 最大 RTT {sample['max_ms']:.2f} ms",
                                         "extra": sample,
                                     }
                                 )
