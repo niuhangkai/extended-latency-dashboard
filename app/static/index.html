@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MEXC 延迟监控</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">MEXC WebSocket Monitor</div>
+          <h1>延迟监控台</h1>
+        </div>
+        <div class="status-strip">
+          <span id="connDot" class="dot"></span>
+          <span id="connText">连接中</span>
+          <span id="region">region: -</span>
+          <span id="symbol">symbol: -</span>
+        </div>
+      </header>
+
+      <section id="cards" class="cards"></section>
+
+      <section class="workspace">
+        <section class="panel chart-panel">
+          <div class="panel-head">
+            <div>
+              <h2>实时曲线</h2>
+              <p>合约为 RTT，现货为消息间隔；数值越低越稳。</p>
+            </div>
+            <div class="controls">
+              <button data-minutes="15">15m</button>
+              <button data-minutes="60" class="active">1h</button>
+              <button data-minutes="360">6h</button>
+              <button data-minutes="1440">24h</button>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="latencyChart"></canvas>
+          </div>
+        </section>
+
+        <aside class="side">
+          <section class="panel">
+            <div class="panel-head compact">
+              <h2>时间维度</h2>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>流</th>
+                  <th>p50</th>
+                  <th>p95</th>
+                  <th>p99</th>
+                  <th>max</th>
+                </tr>
+              </thead>
+              <tbody id="summaryRows"></tbody>
+            </table>
+          </section>
+
+          <section class="panel incident-panel">
+            <div class="panel-head compact">
+              <h2>异常记录</h2>
+            </div>
+            <div id="incidents" class="incidents"></div>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

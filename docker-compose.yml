@@ -1,0 +1,15 @@
+services:
+  mexc-latency-dashboard:
+    build: .
+    container_name: mexc-latency-dashboard
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      MEXC_REGION: "${MEXC_REGION:-local}"
+      MEXC_SYMBOL: "${MEXC_SYMBOL:-BTCUSDT}"
+      MEXC_STREAMS: "${MEXC_STREAMS:-spot_bbo,spot_trades,spot_l2,contract_ping}"
+      MEXC_REPORT_SECONDS: "${MEXC_REPORT_SECONDS:-5}"
+      MEXC_DB_PATH: "/app/data/latency.sqlite"
+    volumes:
+      - ./data:/app/data
