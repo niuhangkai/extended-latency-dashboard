@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import ssl
 import statistics
@@ -8,7 +10,9 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlencode
 
+import httpx
 import websockets
 
 from app.config import Settings
@@ -16,6 +20,7 @@ from app.storage import Storage, now_ms
 
 
 SPOT_WS_URL = "wss://wbs-api.mexc.com/ws"
+SPOT_REST_URL = "https://api.mexc.com"
 CONTRACT_WS_URL = "wss://contract.mexc.com/edge"
 
 Broadcast = Callable[[dict[str, Any]], Awaitable[None]]
@@ -113,6 +118,8 @@ class MexcLatencyCollector:
             )
         if "contract_ping" in self.settings.streams:
             self.tasks.append(asyncio.create_task(self._contract_ping()))
+        if "spot_order_test" in self.settings.streams:
+            self.tasks.append(asyncio.create_task(self._spot_order_test()))
 
     async def stop(self) -> None:
         self.stop_event.set()
@@ -247,6 +254,152 @@ class MexcLatencyCollector:
                     }
                 )
                 await asyncio.sleep(2)
+
+    def _signed_order_test_body(self) -> str:
+        params = [
+            ("symbol", self.settings.order_test_symbol),
+            ("side", self.settings.order_test_side),
+            ("type", "LIMIT"),
+            ("quantity", self.settings.order_test_quantity),
+            ("price", self.settings.order_test_price),
+            ("recvWindow", str(self.settings.order_test_recv_window_ms)),
+            ("timestamp", str(now_ms())),
+        ]
+        body = urlencode(params)
+        signature = hmac.new(
+            self.settings.api_secret.encode(),
+            body.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return f"{body}&signature={signature}"
+
+    async def _post_order_test(self, client: httpx.AsyncClient) -> tuple[bool, int | None, str]:
+        body = self._signed_order_test_body()
+        response = await client.post(
+            "/api/v3/order/test",
+            content=body,
+            headers={
+                "X-MEXC-APIKEY": self.settings.api_key,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+        return response.status_code < 400, response.status_code, response.text[:300]
+
+    async def _spot_order_test(self) -> None:
+        stream = "spot_order_test"
+        if not self.settings.api_key or not self.settings.api_secret:
+            await self._save_incident(
+                {
+                    "ts_ms": now_ms(),
+                    "region": self.settings.region,
+                    "stream": stream,
+                    "symbol": self.settings.order_test_symbol,
+                    "severity": "error",
+                    "type": "config_error",
+                    "message": "未配置 MEXC_API_KEY 或 MEXC_API_SECRET，模拟下单延迟监控未启动",
+                    "extra": {},
+                }
+            )
+            return
+
+        window = Window()
+        report_started_at = time.time()
+        timeout = httpx.Timeout(self.settings.order_test_timeout_seconds)
+        async with httpx.AsyncClient(base_url=SPOT_REST_URL, timeout=timeout) as client:
+            while not self.stop_event.is_set():
+                try:
+                    send_t = time.perf_counter()
+                    ok, status_code, response_text = await self._post_order_test(client)
+                    latency_ms = (time.perf_counter() - send_t) * 1000
+                    window.messages += 1
+
+                    if ok:
+                        window.add_value(latency_ms)
+                    else:
+                        window.timeouts += 1
+                        await self._save_incident(
+                            {
+                                "ts_ms": now_ms(),
+                                "region": self.settings.region,
+                                "stream": stream,
+                                "symbol": self.settings.order_test_symbol,
+                                "severity": "warning",
+                                "type": "order_test_error",
+                                "message": f"模拟下单测试失败，HTTP {status_code}",
+                                "extra": {"status_code": status_code, "response": response_text},
+                            }
+                        )
+
+                    current = time.time()
+                    if current - report_started_at >= self.settings.report_seconds:
+                        sample = {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.order_test_symbol,
+                            "metric_type": "order_test_ack",
+                            "window_s": current - report_started_at,
+                            "messages": window.messages,
+                            "bytes": 0,
+                            "reconnects": 0,
+                            "timeouts": window.timeouts,
+                            **window.summary(),
+                        }
+                        await self._save_sample(sample)
+                        if sample.get("max_ms") and sample["max_ms"] > 500:
+                            await self._save_incident(
+                                {
+                                    "ts_ms": now_ms(),
+                                    "region": self.settings.region,
+                                    "stream": stream,
+                                    "symbol": self.settings.order_test_symbol,
+                                    "severity": "warning",
+                                    "type": "order_test_spike",
+                                    "message": f"模拟下单 ACK 最大耗时 {sample['max_ms']:.2f} ms",
+                                    "extra": sample,
+                                }
+                            )
+                        window.clear()
+                        report_started_at = current
+
+                except asyncio.CancelledError:
+                    raise
+                except httpx.TimeoutException:
+                    window.timeouts += 1
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.order_test_symbol,
+                            "severity": "warning",
+                            "type": "timeout",
+                            "message": "模拟下单测试请求超时",
+                            "extra": {},
+                        }
+                    )
+                except Exception as exc:
+                    window.timeouts += 1
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.order_test_symbol,
+                            "severity": "error",
+                            "type": "error",
+                            "message": repr(exc),
+                            "extra": {},
+                        }
+                    )
+
+                try:
+                    await asyncio.wait_for(
+                        self.stop_event.wait(),
+                        timeout=self.settings.order_test_interval_seconds,
+                    )
+                except asyncio.TimeoutError:
+                    pass
 
     async def _contract_ping(self) -> None:
         ssl_ctx = ssl.create_default_context()

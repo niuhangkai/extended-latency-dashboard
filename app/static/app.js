@@ -6,6 +6,7 @@ const state = {
 
 const colors = {
   contract_ping: "#ffd133",
+  spot_order_test: "#a78bfa",
   spot_bbo: "#2dd4bf",
   spot_trades: "#38bdf8",
   spot_l2: "#fb923c",
@@ -13,6 +14,7 @@ const colors = {
 
 const streamNames = {
   contract_ping: "合约 ping",
+  spot_order_test: "模拟下单",
   spot_bbo: "现货 BBO",
   spot_trades: "现货 trades",
   spot_l2: "现货 L2",
@@ -21,6 +23,7 @@ const streamNames = {
 const metricNames = {
   rtt: "RTT",
   message_gap: "消息间隔",
+  order_test_ack: "ACK 耗时",
 };
 
 const severityNames = {
@@ -59,7 +62,7 @@ async function getJson(url) {
 
 function renderCards(items) {
   const el = document.querySelector("#cards");
-  const ordered = ["contract_ping", "spot_bbo", "spot_trades", "spot_l2"];
+  const ordered = ["contract_ping", "spot_order_test", "spot_bbo", "spot_trades", "spot_l2"];
   const byStream = new Map(items.map((item) => [item.stream, item]));
   el.innerHTML = ordered
     .map((stream) => {
@@ -111,6 +114,9 @@ function incidentText(item) {
     text: "收到文本消息",
     gap_spike: "消息间隔尖峰",
     rtt_spike: "RTT 尖峰",
+    order_test_error: "模拟下单失败",
+    order_test_spike: "模拟下单尖峰",
+    config_error: "配置错误",
     error: "连接错误",
   }[item.type] || item.type;
 
@@ -127,7 +133,12 @@ function incidentText(item) {
     return { title: `${stream} ${type}`, detail: connectMs ? `连接耗时 ${fmt(connectMs, 2)} ms` : item.message };
   }
   if (item.type === "timeout") {
-    const timeoutText = item.stream === "contract_ping" ? "5 秒内没有收到 pong" : "10 秒内没有收到消息";
+    const timeoutText =
+      item.stream === "contract_ping"
+        ? "5 秒内没有收到 pong"
+        : item.stream === "spot_order_test"
+          ? "测试请求超时"
+          : "10 秒内没有收到消息";
     return { title: `${stream} ${type}`, detail: timeoutText };
   }
   if (item.type === "gap_spike") {
@@ -135,6 +146,12 @@ function incidentText(item) {
   }
   if (item.type === "rtt_spike") {
     return { title: `${stream} ${type}`, detail: `最大 RTT ${fmt(extra.max_ms, 2)} ms` };
+  }
+  if (item.type === "order_test_error") {
+    return { title: `${stream} ${type}`, detail: item.message };
+  }
+  if (item.type === "order_test_spike") {
+    return { title: `${stream} ${type}`, detail: `最大 ACK 耗时 ${fmt(extra.max_ms, 2)} ms` };
   }
   if (item.type === "error") {
     return { title: `${stream} ${type}`, detail: item.message };
