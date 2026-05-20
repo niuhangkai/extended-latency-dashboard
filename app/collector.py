@@ -10,6 +10,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 from urllib.parse import urlencode
 
 import httpx
@@ -22,6 +23,8 @@ from app.storage import Storage, now_ms
 SPOT_WS_URL = "wss://wbs-api.mexc.com/ws"
 SPOT_REST_URL = "https://api.mexc.com"
 CONTRACT_WS_URL = "wss://contract.mexc.com/edge"
+EXTENDED_REST_URL = "https://api.starknet.extended.exchange/api/v1"
+EXTENDED_WS_URL = "wss://api.starknet.extended.exchange/stream.extended.exchange/v1"
 
 Broadcast = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -120,6 +123,38 @@ class MexcLatencyCollector:
             self.tasks.append(asyncio.create_task(self._contract_ping()))
         if "spot_order_test" in self.settings.streams:
             self.tasks.append(asyncio.create_task(self._spot_order_test()))
+        if "extended_rest" in self.settings.streams:
+            self.tasks.append(asyncio.create_task(self._extended_rest_ping()))
+        if "extended_bbo" in self.settings.streams:
+            self.tasks.append(
+                asyncio.create_task(
+                    self._extended_ws_stream(
+                        stream="extended_bbo",
+                        path=f"orderbooks/{quote(self.settings.extended_market)}?depth=1",
+                        metric_type="event_lag",
+                    )
+                )
+            )
+        if "extended_l2" in self.settings.streams:
+            self.tasks.append(
+                asyncio.create_task(
+                    self._extended_ws_stream(
+                        stream="extended_l2",
+                        path=f"orderbooks/{quote(self.settings.extended_market)}",
+                        metric_type="message_gap",
+                    )
+                )
+            )
+        if "extended_trades" in self.settings.streams:
+            self.tasks.append(
+                asyncio.create_task(
+                    self._extended_ws_stream(
+                        stream="extended_trades",
+                        path=f"publicTrades/{quote(self.settings.extended_market)}",
+                        metric_type="message_gap",
+                    )
+                )
+            )
 
     async def stop(self) -> None:
         self.stop_event.set()
@@ -251,6 +286,214 @@ class MexcLatencyCollector:
                         "type": "error",
                         "message": repr(exc),
                         "extra": {"channel": channel},
+                    }
+                )
+                await asyncio.sleep(2)
+
+    def _extended_event_lag_ms(self, raw: str) -> float | None:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        ts = payload.get("ts")
+        if not isinstance(ts, (int, float)):
+            return None
+        lag = now_ms() - int(ts)
+        if lag < 0 or lag > 600_000:
+            return None
+        return float(lag)
+
+    async def _extended_rest_ping(self) -> None:
+        stream = "extended_rest"
+        window = Window()
+        report_started_at = time.time()
+        timeout = httpx.Timeout(self.settings.extended_timeout_seconds)
+        async with httpx.AsyncClient(base_url=EXTENDED_REST_URL, timeout=timeout) as client:
+            while not self.stop_event.is_set():
+                try:
+                    send_t = time.perf_counter()
+                    response = await client.get("/info/markets", params={"market": self.settings.extended_market})
+                    latency_ms = (time.perf_counter() - send_t) * 1000
+                    window.messages += 1
+                    if response.status_code < 400:
+                        window.add_value(latency_ms)
+                    else:
+                        window.timeouts += 1
+                        await self._save_incident(
+                            {
+                                "ts_ms": now_ms(),
+                                "region": self.settings.region,
+                                "stream": stream,
+                                "symbol": self.settings.extended_market,
+                                "severity": "warning",
+                                "type": "extended_rest_error",
+                                "message": f"Extended REST 请求失败，HTTP {response.status_code}",
+                                "extra": {"response": response.text[:300]},
+                            }
+                        )
+
+                    current = time.time()
+                    if current - report_started_at >= self.settings.report_seconds:
+                        sample = {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.extended_market,
+                            "metric_type": "rest_rtt",
+                            "window_s": current - report_started_at,
+                            "messages": window.messages,
+                            "bytes": 0,
+                            "reconnects": 0,
+                            "timeouts": window.timeouts,
+                            **window.summary(),
+                        }
+                        await self._save_sample(sample)
+                        window.clear()
+                        report_started_at = current
+
+                except asyncio.CancelledError:
+                    raise
+                except httpx.TimeoutException:
+                    window.timeouts += 1
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.extended_market,
+                            "severity": "warning",
+                            "type": "timeout",
+                            "message": "Extended REST 请求超时",
+                            "extra": {},
+                        }
+                    )
+                except Exception as exc:
+                    window.timeouts += 1
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.extended_market,
+                            "severity": "error",
+                            "type": "error",
+                            "message": repr(exc),
+                            "extra": {},
+                        }
+                    )
+
+                try:
+                    await asyncio.wait_for(
+                        self.stop_event.wait(),
+                        timeout=self.settings.extended_rest_interval_seconds,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+
+    async def _extended_ws_stream(self, *, stream: str, path: str, metric_type: str) -> None:
+        reconnects = 0
+        window = Window()
+        last_msg_at: float | None = None
+        report_started_at = time.time()
+        url = f"{EXTENDED_WS_URL}/{path}"
+
+        while not self.stop_event.is_set():
+            try:
+                reconnects += 1
+                connect_t0 = time.perf_counter()
+                async with websockets.connect(url, ping_interval=None) as ws:
+                    connect_ms = (time.perf_counter() - connect_t0) * 1000
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.extended_market,
+                            "severity": "info",
+                            "type": "connect",
+                            "message": f"{stream} 连接成功，耗时 {connect_ms:.2f} ms",
+                            "extra": {"url": url, "connect_ms": rounded(connect_ms)},
+                        }
+                    )
+
+                    while not self.stop_event.is_set():
+                        try:
+                            msg = await asyncio.wait_for(
+                                ws.recv(),
+                                timeout=self.settings.extended_timeout_seconds + 15,
+                            )
+                        except asyncio.TimeoutError:
+                            window.timeouts += 1
+                            await self._save_incident(
+                                {
+                                    "ts_ms": now_ms(),
+                                    "region": self.settings.region,
+                                    "stream": stream,
+                                    "symbol": self.settings.extended_market,
+                                    "severity": "warning",
+                                    "type": "timeout",
+                                    "message": f"{stream} 长时间没有收到消息",
+                                    "extra": {"url": url},
+                                }
+                            )
+                            break
+
+                        current = time.time()
+                        raw = msg if isinstance(msg, str) else msg.decode("utf-8", errors="ignore")
+                        window.messages += 1
+                        window.bytes += len(raw)
+
+                        lag_ms = self._extended_event_lag_ms(raw) if metric_type == "event_lag" else None
+                        if metric_type == "event_lag" and lag_ms is not None:
+                            window.add_value(lag_ms)
+                        elif last_msg_at is not None:
+                            window.add_value((current - last_msg_at) * 1000)
+                        last_msg_at = current
+
+                        if current - report_started_at >= self.settings.report_seconds:
+                            sample = {
+                                "ts_ms": now_ms(),
+                                "region": self.settings.region,
+                                "stream": stream,
+                                "symbol": self.settings.extended_market,
+                                "metric_type": metric_type,
+                                "window_s": current - report_started_at,
+                                "messages": window.messages,
+                                "bytes": window.bytes,
+                                "reconnects": max(0, reconnects - 1),
+                                "timeouts": window.timeouts,
+                                **window.summary(),
+                            }
+                            await self._save_sample(sample)
+                            if sample.get("max_ms") and sample["max_ms"] > 1000:
+                                await self._save_incident(
+                                    {
+                                        "ts_ms": now_ms(),
+                                        "region": self.settings.region,
+                                        "stream": stream,
+                                        "symbol": self.settings.extended_market,
+                                        "severity": "warning",
+                                        "type": "extended_lag_spike",
+                                        "message": f"{stream} 最大消息 lag {sample['max_ms']:.2f} ms",
+                                        "extra": sample,
+                                    }
+                                )
+                            window.clear()
+                            report_started_at = current
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await self._save_incident(
+                    {
+                        "ts_ms": now_ms(),
+                        "region": self.settings.region,
+                        "stream": stream,
+                        "symbol": self.settings.extended_market,
+                        "severity": "error",
+                        "type": "error",
+                        "message": repr(exc),
+                        "extra": {"url": url},
                     }
                 )
                 await asyncio.sleep(2)

@@ -1,5 +1,6 @@
 const state = {
   minutes: 60,
+  streams: [],
   latest: new Map(),
   chart: null,
 };
@@ -10,6 +11,10 @@ const colors = {
   spot_bbo: "#2dd4bf",
   spot_trades: "#38bdf8",
   spot_l2: "#fb923c",
+  extended_rest: "#f472b6",
+  extended_bbo: "#34d399",
+  extended_l2: "#60a5fa",
+  extended_trades: "#f97316",
 };
 
 const streamNames = {
@@ -18,12 +23,18 @@ const streamNames = {
   spot_bbo: "现货 BBO",
   spot_trades: "现货 trades",
   spot_l2: "现货 L2",
+  extended_rest: "Extended REST",
+  extended_bbo: "Extended BBO",
+  extended_l2: "Extended L2",
+  extended_trades: "Extended trades",
 };
 
 const metricNames = {
   rtt: "RTT",
   message_gap: "消息间隔",
   order_test_ack: "ACK 耗时",
+  rest_rtt: "REST RTT",
+  event_lag: "消息 lag",
 };
 
 const severityNames = {
@@ -60,10 +71,22 @@ async function getJson(url) {
   return res.json();
 }
 
-function renderCards(items) {
+function renderCards(items, activeStreams = []) {
   const el = document.querySelector("#cards");
-  const ordered = ["contract_ping", "spot_order_test", "spot_bbo", "spot_trades", "spot_l2"];
+  const preferred = [
+    "contract_ping",
+    "spot_order_test",
+    "spot_bbo",
+    "spot_trades",
+    "spot_l2",
+    "extended_rest",
+    "extended_bbo",
+    "extended_l2",
+    "extended_trades",
+  ];
   const byStream = new Map(items.map((item) => [item.stream, item]));
+  const active = new Set([...activeStreams, ...byStream.keys()]);
+  const ordered = preferred.filter((stream) => active.has(stream));
   el.innerHTML = ordered
     .map((stream) => {
       const item = byStream.get(stream);
@@ -116,6 +139,8 @@ function incidentText(item) {
     rtt_spike: "RTT 尖峰",
     order_test_error: "模拟下单失败",
     order_test_spike: "模拟下单尖峰",
+    extended_rest_error: "Extended REST 失败",
+    extended_lag_spike: "Extended 消息 lag 尖峰",
     config_error: "配置错误",
     error: "连接错误",
   }[item.type] || item.type;
@@ -152,6 +177,12 @@ function incidentText(item) {
   }
   if (item.type === "order_test_spike") {
     return { title: `${stream} ${type}`, detail: `最大 ACK 耗时 ${fmt(extra.max_ms, 2)} ms` };
+  }
+  if (item.type === "extended_rest_error") {
+    return { title: `${stream} ${type}`, detail: item.message };
+  }
+  if (item.type === "extended_lag_spike") {
+    return { title: `${stream} ${type}`, detail: `最大消息 lag ${fmt(extra.max_ms, 2)} ms` };
   }
   if (item.type === "error") {
     return { title: `${stream} ${type}`, detail: item.message };
@@ -231,8 +262,9 @@ async function refreshAll() {
   ]);
 
   document.querySelector("#region").textContent = `region: ${status.region}`;
-  document.querySelector("#symbol").textContent = `symbol: ${status.symbol}`;
-  renderCards(status.latest);
+  document.querySelector("#symbol").textContent = `symbol: ${status.symbol} / extended: ${status.extended_market}`;
+  state.streams = status.streams;
+  renderCards(status.latest, state.streams);
   buildChart(series.items);
   renderSummary(summary.items);
   renderIncidents(incidents.items);
@@ -253,7 +285,7 @@ function connectWs() {
     const payload = JSON.parse(event.data);
     if (payload.type === "sample") {
       state.latest.set(payload.data.stream, payload.data);
-      renderCards([...state.latest.values()]);
+      renderCards([...state.latest.values()], state.streams);
     }
     if (payload.type === "incident") {
       refreshAll();

@@ -59,6 +59,7 @@ async def status() -> dict[str, Any]:
     return {
         "region": settings.region,
         "symbol": settings.symbol,
+        "extended_market": settings.extended_market,
         "streams": sorted(settings.streams),
         "report_seconds": settings.report_seconds,
         "latest": storage.latest_samples(),

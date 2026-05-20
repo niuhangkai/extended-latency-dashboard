@@ -7,6 +7,7 @@
 - 实时监控 MEXC 现货 `BBO / trades / L2` 消息间隔。
 - 实时监控 MEXC 合约 WebSocket `ping/pong RTT`。
 - 可选监控 MEXC 现货 `POST /api/v3/order/test` 测试下单 ACK 耗时。
+- 可选监控 Extended REST RTT、BBO 消息 lag、L2/trades 消息间隔。
 - SQLite 本地保存每个窗口的统计指标。
 - 记录异常：断连、重连、超时、消息间隔尖峰、RTT 尖峰。
 - 前端页面展示最新统计窗口、15m/1h/6h/24h/48h/72h 历史曲线、时间维度统计、异常日志。
@@ -16,6 +17,8 @@
 顶部指标卡展示的是最新一个统计窗口，窗口长度由 `MEXC_REPORT_SECONDS` 控制，默认约 5 秒；右侧“时间维度”和主图才会跟随 15m/1h/6h/24h/48h/72h 按钮切换。
 
 `spot_order_test` 使用 MEXC 现货测试下单接口，只校验订单参数，不进入撮合引擎。MEXC 官方文档说明当前 API 没有 sandbox/test 环境，所以这个指标代表“现货测试下单 ACK 耗时”，不是合约模拟盘真实撮合延迟。
+
+Extended 官方 API 服务器位于 AWS Tokyo `ap-northeast-1a`。Extended 的 BBO 使用消息时间戳计算本机收到时的 lag；Extended full L2 和 trades 的初始快照/成交流可能包含较旧时间戳，因此本项目按消息间隔展示，避免误判为网络延迟。
 
 ## 本地运行
 
@@ -77,6 +80,33 @@ docker compose up -d --build
 ```
 
 默认每 10 秒发送一次 `POST /api/v3/order/test`。这个接口不会产生真实订单，但 API Key 仍然要当敏感信息保护，`.env` 不要提交到 Git。
+
+## Extended 延迟监控
+
+Extended 公共行情不需要 API Key。开启 Extended 监控：
+
+```bash
+cat > .env <<'EOF'
+MEXC_REGION=vultr-jp
+MEXC_SYMBOL=BTCUSDT
+MEXC_STREAMS=extended_rest,extended_bbo,extended_l2,extended_trades
+MEXC_REPORT_SECONDS=5
+APP_PORT=8080
+
+EXTENDED_MARKET=BTC-USD
+EXTENDED_REST_INTERVAL_SECONDS=1
+EXTENDED_TIMEOUT_SECONDS=5
+EOF
+
+docker compose up -d --build
+```
+
+Extended 主网 API：
+
+```text
+REST https://api.starknet.extended.exchange/api/v1
+WS   wss://api.starknet.extended.exchange/stream.extended.exchange/v1
+```
 
 ## VPS 部署
 
@@ -206,6 +236,9 @@ docker compose ps
 | `MEXC_ORDER_TEST_INTERVAL_SECONDS` | `10` | 测试下单请求间隔 |
 | `MEXC_ORDER_TEST_RECV_WINDOW_MS` | `5000` | 签名请求 recvWindow |
 | `MEXC_ORDER_TEST_TIMEOUT_SECONDS` | `5` | HTTP 请求超时秒数 |
+| `EXTENDED_MARKET` | `BTC-USD` | Extended 监控市场 |
+| `EXTENDED_REST_INTERVAL_SECONDS` | `1` | Extended REST RTT 请求间隔 |
+| `EXTENDED_TIMEOUT_SECONDS` | `5` | Extended HTTP/WS 超时基准秒数 |
 
 ## 和行情录制的关系
 
