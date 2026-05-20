@@ -69,6 +69,13 @@ class Storage:
             )
             self._conn.commit()
 
+    def _stream_filter(self, streams: set[str] | None, params: list[Any]) -> str:
+        if not streams:
+            return ""
+        placeholders = ",".join("?" for _ in streams)
+        params.extend(sorted(streams))
+        return f" AND stream IN ({placeholders})"
+
     def insert_sample(self, sample: dict[str, Any]) -> dict[str, Any]:
         row = {
             "ts_ms": int(sample["ts_ms"]),
@@ -135,29 +142,35 @@ class Storage:
             row["id"] = cur.lastrowid
         return row
 
-    def latest_samples(self) -> list[dict[str, Any]]:
+    def latest_samples(self, streams: set[str] | None = None) -> list[dict[str, Any]]:
+        params: list[Any] = []
+        stream_filter = self._stream_filter(streams, params)
         with self._lock:
             rows = self._conn.execute(
-                """
+                f"""
                 SELECT s.*
                 FROM samples s
                 JOIN (
                     SELECT stream, MAX(ts_ms) AS ts_ms
                     FROM samples
+                    WHERE 1 = 1 {stream_filter}
                     GROUP BY stream
                 ) latest
                 ON latest.stream = s.stream AND latest.ts_ms = s.ts_ms
                 ORDER BY s.stream
-                """
+                """,
+                params,
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def series(self, since_ms: int, stream: str | None = None) -> list[dict[str, Any]]:
+    def series(self, since_ms: int, stream: str | None = None, streams: set[str] | None = None) -> list[dict[str, Any]]:
         params: list[Any] = [since_ms]
         where = "ts_ms >= ?"
         if stream:
             where += " AND stream = ?"
             params.append(stream)
+        else:
+            where += self._stream_filter(streams, params)
         with self._lock:
             rows = self._conn.execute(
                 f"""
@@ -170,10 +183,12 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def summary(self, since_ms: int) -> list[dict[str, Any]]:
+    def summary(self, since_ms: int, streams: set[str] | None = None) -> list[dict[str, Any]]:
+        params: list[Any] = [since_ms]
+        stream_filter = self._stream_filter(streams, params)
         with self._lock:
             rows = self._conn.execute(
-                """
+                f"""
                 SELECT
                     stream,
                     metric_type,
@@ -189,24 +204,27 @@ class Storage:
                     MAX(reconnects) AS reconnects,
                     SUM(timeouts) AS timeouts
                 FROM samples
-                WHERE ts_ms >= ?
+                WHERE ts_ms >= ? {stream_filter}
                 GROUP BY stream, metric_type
                 ORDER BY stream
                 """,
-                [since_ms],
+                params,
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def incidents(self, since_ms: int, limit: int = 200) -> list[dict[str, Any]]:
+    def incidents(self, since_ms: int, streams: set[str] | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        params: list[Any] = [since_ms]
+        stream_filter = self._stream_filter(streams, params)
+        params.append(limit)
         with self._lock:
             rows = self._conn.execute(
-                """
+                f"""
                 SELECT *
                 FROM incidents
-                WHERE ts_ms >= ?
+                WHERE ts_ms >= ? {stream_filter}
                 ORDER BY ts_ms DESC
                 LIMIT ?
                 """,
-                [since_ms, limit],
+                params,
             ).fetchall()
         return [dict(row) for row in rows]

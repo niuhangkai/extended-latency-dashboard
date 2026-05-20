@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MEXC 延迟监控</title>
+    <title>交易所延迟监控</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   </head>
@@ -11,7 +11,7 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <div class="eyebrow">MEXC WebSocket Monitor</div>
+          <div class="eyebrow">Exchange Latency Monitor</div>
           <h1>延迟监控台</h1>
         </div>
         <div class="status-strip">
@@ -29,7 +29,7 @@
           <div class="panel-head">
             <div>
               <h2>实时曲线</h2>
-              <p>合约为 RTT，现货为消息间隔；数值越低越稳。</p>
+              <p>RTT、消息 lag 与消息间隔；数值越低越稳。</p>
             </div>
             <div class="controls">
               <button data-minutes="15">15m</button>

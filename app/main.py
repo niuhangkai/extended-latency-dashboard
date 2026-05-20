@@ -16,7 +16,7 @@ from app.storage import Storage
 
 settings = load_settings()
 storage = Storage(settings.db_path)
-app = FastAPI(title="MEXC Latency Dashboard")
+app = FastAPI(title="Exchange Latency Dashboard")
 clients: set[WebSocket] = set()
 collector: MexcLatencyCollector | None = None
 
@@ -62,26 +62,26 @@ async def status() -> dict[str, Any]:
         "extended_market": settings.extended_market,
         "streams": sorted(settings.streams),
         "report_seconds": settings.report_seconds,
-        "latest": storage.latest_samples(),
+        "latest": storage.latest_samples(settings.streams),
     }
 
 
 @app.get("/api/series")
 async def series(minutes: int = 60, stream: Optional[str] = None) -> dict[str, Any]:
     since_ms = int((time.time() - minutes * 60) * 1000)
-    return {"items": storage.series(since_ms, stream)}
+    return {"items": storage.series(since_ms, stream, settings.streams)}
 
 
 @app.get("/api/summary")
 async def summary(minutes: int = 60) -> dict[str, Any]:
     since_ms = int((time.time() - minutes * 60) * 1000)
-    return {"items": storage.summary(since_ms)}
+    return {"items": storage.summary(since_ms, settings.streams)}
 
 
 @app.get("/api/incidents")
 async def incidents(minutes: int = 60) -> dict[str, Any]:
     since_ms = int((time.time() - minutes * 60) * 1000)
-    return {"items": storage.incidents(since_ms)}
+    return {"items": storage.incidents(since_ms, settings.streams)}
 
 
 @app.websocket("/ws")
