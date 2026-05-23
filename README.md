@@ -21,7 +21,7 @@
 
 启用 `extended_order_test` 会自动打开 `extended_order_place`、`extended_order_cancel`、`extended_order_ws`。下单测试需要 Extended API key、Stark key、vault；建议先用 `EXTENDED_ENV=testnet`。
 
-启用 `extended_fill_test` 会发送 IOC 可成交订单，自动打开 `extended_fill_place`、`extended_fill_ws`。该测试默认只允许 `EXTENDED_ENV=testnet`；如果要在主网运行，必须显式设置 `EXTENDED_FILL_ALLOW_MAINNET=true`。
+启用 `extended_fill_test` 会发送 IOC 可成交订单，自动打开 `extended_fill_place`、`extended_fill_ws`。该测试默认只允许 `EXTENDED_ENV=testnet`；如果要在主网运行，必须显式设置 `EXTENDED_FILL_ALLOW_MAINNET=true`。下单 fee 默认从 `/user/fees` 读取，只有需要覆盖时才设置 `EXTENDED_ORDER_TEST_TAKER_FEE` 或 `EXTENDED_FILL_TEST_TAKER_FEE`。
 
 ## 本地运行
 

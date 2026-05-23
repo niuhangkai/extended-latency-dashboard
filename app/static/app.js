@@ -86,7 +86,7 @@ const streamMeta = {
 const metricNames = {
   message_gap: "消息间隔",
   payload_lag: "payload lag",
-  trade_age: "trade age",
+  trade_age: "成交新旧程度",
   order_ack: "下单 ACK",
   cancel_ack: "撤单 ACK",
   order_ws_ack: "下单回报",
@@ -120,6 +120,25 @@ function fmt(value, digits = 1) {
   return Number(value).toFixed(digits);
 }
 
+function fmtDuration(ms) {
+  if (ms === null || ms === undefined || Number.isNaN(Number(ms))) return "-";
+  const value = Number(ms);
+  if (value >= 86_400_000) return `${fmt(value / 86_400_000, 2)} 天`;
+  if (value >= 3_600_000) return `${fmt(value / 3_600_000, 2)} 小时`;
+  if (value >= 60_000) return `${fmt(value / 60_000, 2)} 分钟`;
+  if (value >= 1000) return `${fmt(value / 1000, 2)} 秒`;
+  return `${fmt(value)} ms`;
+}
+
+function fmtMetric(item, value) {
+  return item?.metric_type === "trade_age" ? fmtDuration(value) : `${fmt(value)} ms`;
+}
+
+function metricClass(item, value) {
+  if (item?.metric_type === "trade_age") return "neutral";
+  return quality(value);
+}
+
 function timeLabel(ts) {
   return new Date(ts).toLocaleTimeString("zh-CN", { hour12: false });
 }
@@ -150,6 +169,10 @@ function quality(value) {
   if (value < 50) return "good";
   if (value < 120) return "warn";
   return "bad";
+}
+
+function chartableItems(items) {
+  return items.filter((item) => item.metric_type !== "trade_age");
 }
 
 function windowLabel(seconds) {
@@ -291,13 +314,13 @@ function renderCards(items, activeStreams = []) {
         <article class="card">
           <div class="card-title"><span>${title}</span><span>${metricNames[item?.metric_type] || item?.metric_type || "等待采样"}</span></div>
           <div class="stream-key">${stream}</div>
-          <div class="metric ${quality(p95)}">${fmt(p95)} ms</div>
+          <div class="metric ${metricClass(item, p95)}">${fmtMetric(item, p95)}</div>
           <div class="window-note">${windowLabel(item?.window_s)}</div>
           <div class="stream-note">${streamNote(stream)}</div>
           <div class="submetrics">
-            <span>p50 <b>${fmt(item?.p50_ms)}</b></span>
-            <span>p99 <b>${fmt(item?.p99_ms)}</b></span>
-            <span>max <b>${fmt(item?.max_ms)}</b></span>
+            <span>p50 <b>${fmtMetric(item, item?.p50_ms)}</b></span>
+            <span>p99 <b>${fmtMetric(item, item?.p99_ms)}</b></span>
+            <span>max <b>${fmtMetric(item, item?.max_ms)}</b></span>
           </div>
           <div class="submetrics">
             <span>消息 <b>${item?.messages ?? "-"}</b></span>
@@ -316,10 +339,10 @@ function renderSummary(items) {
       (item) => `
       <tr>
         <td>${streamLabel(item.stream)}</td>
-        <td>${fmt(item.p50_ms)}</td>
-        <td>${fmt(item.p95_ms)}</td>
-        <td>${fmt(item.p99_ms)}</td>
-        <td>${fmt(item.max_ms)}</td>
+        <td>${fmtMetric(item, item.p50_ms)}</td>
+        <td>${fmtMetric(item, item.p95_ms)}</td>
+        <td>${fmtMetric(item, item.p99_ms)}</td>
+        <td>${fmtMetric(item, item.max_ms)}</td>
       </tr>
     `,
     )
@@ -438,9 +461,10 @@ function renderIncidents(items) {
 function buildChart(items) {
   if (!window.Chart) return;
 
-  const streams = [...new Set(items.map((item) => item.stream))];
+  const chartItems = chartableItems(items);
+  const streams = [...new Set(chartItems.map((item) => item.stream))];
   const datasets = streams.map((stream) => {
-    const rows = items.filter((item) => item.stream === stream).sort((a, b) => a.ts_ms - b.ts_ms);
+    const rows = chartItems.filter((item) => item.stream === stream).sort((a, b) => a.ts_ms - b.ts_ms);
     return {
       label: streamLabel(stream),
       data: rows.map((item) => ({

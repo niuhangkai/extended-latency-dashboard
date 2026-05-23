@@ -542,6 +542,15 @@ class ExchangeLatencyCollector:
             return market.trading_config.round_order_size(Decimal(self.settings.extended_fill_test_quantity))
         return Decimal(market.trading_config.min_order_size)
 
+    async def _extended_taker_fee(self, client: Any, configured_fee: str) -> Decimal:
+        if configured_fee and configured_fee != "0.00025":
+            return Decimal(configured_fee)
+        fees = await client.account.get_fees(market_names=[self.settings.extended_market])
+        for fee in getattr(fees, "data", []) or []:
+            if getattr(fee, "market", "") == self.settings.extended_market:
+                return Decimal(getattr(fee, "taker_fee_rate"))
+        raise ValueError(f"Extended 未返回 {self.settings.extended_market} 的 taker fee")
+
     async def _extended_account_stream(self) -> None:
         stream = "extended_order_ws"
         if self._extended_order_config_errors():
@@ -682,6 +691,7 @@ class ExchangeLatencyCollector:
             client = await self._create_extended_client()
             markets = await client.markets_info.get_markets_dict()
             market = markets[self.settings.extended_market]
+            taker_fee = await self._extended_taker_fee(client, self.settings.extended_order_test_taker_fee)
 
             await self._save_incident(
                 {
@@ -712,7 +722,7 @@ class ExchangeLatencyCollector:
                             amount_of_synthetic=quantity,
                             price=price,
                             side=side,
-                            taker_fee=Decimal(self.settings.extended_order_test_taker_fee),
+                            taker_fee=taker_fee,
                             post_only=True,
                             time_in_force=TimeInForce.GTT,
                             external_id=external_id,
@@ -770,6 +780,15 @@ class ExchangeLatencyCollector:
                         }
                     )
                 except Exception as exc:
+                    self.extended_order_submitted_at.pop(external_id, None)
+                    self.extended_cancel_submitted_at.pop(external_id, None)
+                    await self._save_extended_order_sample(
+                        stream="extended_order_place",
+                        metric_type="order_ack",
+                        latency_ms=0,
+                        timeouts=1,
+                        extra={"external_id": external_id, "order_id": placed_order_id, "error": repr(exc)},
+                    )
                     await self._save_incident(
                         {
                             "ts_ms": now_ms(),
@@ -856,6 +875,7 @@ class ExchangeLatencyCollector:
             client = await self._create_extended_client()
             markets = await client.markets_info.get_markets_dict()
             market = markets[self.settings.extended_market]
+            taker_fee = await self._extended_taker_fee(client, self.settings.extended_fill_test_taker_fee)
 
             await self._save_incident(
                 {
@@ -886,7 +906,7 @@ class ExchangeLatencyCollector:
                             amount_of_synthetic=quantity,
                             price=price,
                             side=side,
-                            taker_fee=Decimal(self.settings.extended_fill_test_taker_fee),
+                            taker_fee=taker_fee,
                             post_only=False,
                             time_in_force=TimeInForce.IOC,
                             external_id=external_id,
@@ -935,6 +955,14 @@ class ExchangeLatencyCollector:
                     )
                 except Exception as exc:
                     self.extended_fill_submitted_at.pop(external_id, None)
+                    await self._save_extended_order_sample(
+                        stream="extended_fill_place",
+                        metric_type="fill_order_ack",
+                        latency_ms=0,
+                        timeouts=1,
+                        window_s=self.settings.extended_fill_test_interval_seconds,
+                        extra={"external_id": external_id, "order_id": placed_order_id, "error": repr(exc)},
+                    )
                     await self._save_incident(
                         {
                             "ts_ms": now_ms(),

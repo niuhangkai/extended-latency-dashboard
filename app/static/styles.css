@@ -269,6 +269,10 @@ p {
   color: var(--red);
 }
 
+.metric.neutral {
+  color: var(--text);
+}
+
 .submetrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -367,13 +371,15 @@ button.active {
 
 table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
 }
 
 th,
 td {
-  padding: 9px 10px;
+  padding: 9px 8px;
   border-bottom: 1px solid var(--line);
   text-align: right;
   white-space: nowrap;
@@ -381,7 +387,10 @@ td {
 
 th:first-child,
 td:first-child {
+  width: 44%;
   text-align: left;
+  white-space: normal;
+  word-break: break-word;
 }
 
 th {
@@ -390,7 +399,12 @@ th {
 }
 
 .stability-table {
+  min-width: 650px;
   font-size: 12px;
+}
+
+.side .panel {
+  overflow-x: auto;
 }
 
 .stability-table th,
