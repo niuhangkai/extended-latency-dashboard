@@ -29,6 +29,7 @@ EXTENDED_REST_URL = "https://api.starknet.extended.exchange/api/v1"
 EXTENDED_WS_URL = "wss://api.starknet.extended.exchange/stream.extended.exchange/v1"
 EXTENDED_TESTNET_REST_URL = "https://api.starknet.sepolia.extended.exchange/api/v1"
 EXTENDED_TESTNET_WS_URL = "wss://api.starknet.sepolia.extended.exchange/stream.extended.exchange/v1"
+EXTENDED_USER_AGENT = "exchange-latency-dashboard/1.0"
 
 Broadcast = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -166,6 +167,26 @@ class ExchangeLatencyCollector:
                         stream="extended_trades",
                         path=f"publicTrades/{quote(self.settings.extended_market)}",
                         metric_type="message_gap",
+                    )
+                )
+            )
+        if "extended_mark" in self.settings.streams:
+            self.tasks.append(
+                asyncio.create_task(
+                    self._extended_ws_stream(
+                        stream="extended_mark",
+                        path=f"prices/mark/{quote(self.settings.extended_market)}",
+                        metric_type="event_lag",
+                    )
+                )
+            )
+        if "extended_index" in self.settings.streams:
+            self.tasks.append(
+                asyncio.create_task(
+                    self._extended_ws_stream(
+                        stream="extended_index",
+                        path=f"prices/index/{quote(self.settings.extended_market)}",
+                        metric_type="event_lag",
                     )
                 )
             )
@@ -325,7 +346,11 @@ class ExchangeLatencyCollector:
         window = Window()
         report_started_at = time.time()
         timeout = httpx.Timeout(self.settings.extended_timeout_seconds)
-        async with httpx.AsyncClient(base_url=self.extended_rest_url, timeout=timeout) as client:
+        async with httpx.AsyncClient(
+            base_url=self.extended_rest_url,
+            timeout=timeout,
+            headers={"User-Agent": EXTENDED_USER_AGENT},
+        ) as client:
             while not self.stop_event.is_set():
                 try:
                     send_t = time.perf_counter()
@@ -418,7 +443,11 @@ class ExchangeLatencyCollector:
             try:
                 reconnects += 1
                 connect_t0 = time.perf_counter()
-                async with websockets.connect(url, ping_interval=None) as ws:
+                async with websockets.connect(
+                    url,
+                    ping_interval=None,
+                    user_agent_header=EXTENDED_USER_AGENT,
+                ) as ws:
                     connect_ms = (time.perf_counter() - connect_t0) * 1000
                     await self._save_incident(
                         {

@@ -7,7 +7,7 @@
 - 实时监控 MEXC 现货 `BBO / trades / L2` 消息间隔。
 - 实时监控 MEXC 合约 WebSocket `ping/pong RTT`。
 - 可选监控 MEXC 现货 `POST /api/v3/order/test` 测试下单 ACK 耗时。
-- 可选监控 Extended REST RTT、BBO 消息 lag、L2/trades 消息间隔。
+- 可选监控 Extended REST RTT、BBO/mark/index 消息 lag、L2/trades 消息间隔。
 - 可选监控 Extended 测试网真实下单 REST ACK、撤单 REST ACK、私有 WS 下单/撤单回报延迟。
 - SQLite 本地保存每个窗口的统计指标。
 - 记录异常：断连、重连、超时、消息间隔尖峰、RTT 尖峰。
@@ -90,7 +90,7 @@ Extended 公共行情不需要 API Key。开启 Extended 监控：
 cat > .env <<'EOF'
 MEXC_REGION=vultr-jp
 MEXC_SYMBOL=BTCUSDT
-MEXC_STREAMS=extended_rest,extended_bbo,extended_l2,extended_trades
+MEXC_STREAMS=extended_rest,extended_bbo,extended_l2,extended_trades,extended_mark,extended_index
 MEXC_REPORT_SECONDS=5
 APP_PORT=8080
 
@@ -116,7 +116,7 @@ docker compose up -d --build
 cat > .env <<'EOF'
 EXCHANGE_REGION=aws-tokyo
 EXCHANGE_SYMBOL=BTCUSDT
-EXCHANGE_STREAMS=extended_rest,extended_bbo,extended_l2,extended_order_test
+EXCHANGE_STREAMS=extended_rest,extended_bbo,extended_l2,extended_trades,extended_mark,extended_index,extended_order_test
 EXCHANGE_REPORT_SECONDS=5
 APP_PORT=8080
 
