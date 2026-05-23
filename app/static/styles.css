@@ -162,6 +162,61 @@ p {
   background: var(--yellow);
 }
 
+.active-streams {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(12, 18, 27, 0.82);
+  box-shadow: 0 12px 28px var(--shadow);
+}
+
+.active-streams-title {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.active-stream-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stream-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 178px;
+  padding: 8px 10px;
+  border: 1px solid rgba(125, 141, 163, 0.25);
+  border-radius: 8px;
+  background: rgba(17, 26, 38, 0.86);
+  font-size: 12px;
+}
+
+.stream-chip span,
+.stream-key,
+.stream-note {
+  color: var(--muted);
+}
+
+.stream-chip small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stream-key {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.stream-note {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));

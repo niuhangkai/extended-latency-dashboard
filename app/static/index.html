@@ -3,26 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>交易所延迟监控</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <title>Extended API 连接监控</title>
+    <link rel="stylesheet" href="/static/styles.css?v=extended-only-20260523" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div>
-          <div class="eyebrow">Exchange Latency Monitor</div>
-          <h1>延迟监控台</h1>
+          <div class="eyebrow">Extended API 连接监控</div>
+          <h1>Extended 延迟监控台</h1>
         </div>
         <div class="status-strip">
           <span id="connDot" class="dot"></span>
           <span id="connText">连接中</span>
           <span id="region">region: -</span>
-          <span id="symbol">symbol: -</span>
+          <span id="symbol">市场: -</span>
         </div>
       </header>
 
       <section id="placementBar" class="placement-bar"></section>
+
+      <section id="activeStreams" class="active-streams"></section>
 
       <section id="cards" class="cards"></section>
 
@@ -84,6 +86,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=extended-only-20260523"></script>
   </body>
 </html>

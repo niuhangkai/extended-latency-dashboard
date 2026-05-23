@@ -10,11 +10,6 @@ const state = {
 };
 
 const colors = {
-  contract_ping: "#ffd133",
-  spot_order_test: "#a78bfa",
-  spot_bbo: "#2dd4bf",
-  spot_trades: "#38bdf8",
-  spot_l2: "#fb923c",
   extended_rest: "#f472b6",
   extended_bbo: "#34d399",
   extended_l2: "#60a5fa",
@@ -26,27 +21,51 @@ const colors = {
   extended_order_ws: "#22d3ee",
 };
 
-const streamNames = {
-  contract_ping: "合约 ping",
-  spot_order_test: "模拟下单",
-  spot_bbo: "现货 BBO",
-  spot_trades: "现货 trades",
-  spot_l2: "现货 L2",
-  extended_rest: "Extended REST",
-  extended_bbo: "Extended BBO",
-  extended_l2: "Extended L2",
-  extended_trades: "Extended trades",
-  extended_mark: "Extended mark",
-  extended_index: "Extended index",
-  extended_order_place: "Extended 下单",
-  extended_order_cancel: "Extended 撤单",
-  extended_order_ws: "Extended 私有 WS",
+const streamMeta = {
+  extended_rest: {
+    name: "Extended 公共 REST",
+    note: "公共 markets REST RTT",
+  },
+  extended_bbo: {
+    name: "Extended BBO",
+    note: "BBO 消息时间戳 lag",
+  },
+  extended_l2: {
+    name: "Extended L2",
+    note: "orderbook 消息间隔",
+  },
+  extended_trades: {
+    name: "Extended 成交",
+    note: "publicTrades 消息间隔",
+  },
+  extended_mark: {
+    name: "Extended 标记价格",
+    note: "mark price 消息 lag",
+  },
+  extended_index: {
+    name: "Extended 指数价格",
+    note: "index price 消息 lag",
+  },
+  extended_order_place: {
+    name: "Extended 下单 ACK",
+    note: "测试网真实下单 REST ACK",
+  },
+  extended_order_cancel: {
+    name: "Extended 撤单 ACK",
+    note: "测试网撤单 REST ACK",
+  },
+  extended_order_ws: {
+    name: "Extended 私有回报",
+    note: "私有 WebSocket 下单/撤单回报",
+  },
+  extended_order_test: {
+    name: "Extended 下单测试开关",
+    note: "启用后采集下单 ACK、撤单 ACK、私有 WebSocket 回报",
+  },
 };
 
 const metricNames = {
-  rtt: "RTT",
   message_gap: "消息间隔",
-  order_test_ack: "ACK 耗时",
   order_ack: "下单 ACK",
   cancel_ack: "撤单 ACK",
   order_ws_ack: "下单回报",
@@ -60,6 +79,18 @@ const severityNames = {
   warning: "警告",
   error: "错误",
 };
+
+function streamName(stream) {
+  return streamMeta[stream]?.name || "未知指标";
+}
+
+function streamLabel(stream) {
+  return `${streamName(stream)}（${stream}）`;
+}
+
+function streamNote(stream) {
+  return streamMeta[stream]?.note || stream;
+}
 
 function fmt(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -168,14 +199,44 @@ function renderPlacement(placement) {
   `;
 }
 
+function renderActiveStreams(streams) {
+  const el = document.querySelector("#activeStreams");
+  if (!el) return;
+
+  const ordered = [
+    "extended_rest",
+    "extended_bbo",
+    "extended_l2",
+    "extended_trades",
+    "extended_mark",
+    "extended_index",
+    "extended_order_test",
+    "extended_order_place",
+    "extended_order_cancel",
+    "extended_order_ws",
+  ].filter((stream) => streams.includes(stream));
+
+  el.innerHTML = `
+    <div class="active-streams-title">当前测试 Extended API</div>
+    <div class="active-stream-list">
+      ${ordered
+        .map(
+          (stream) => `
+            <span class="stream-chip">
+              <b>${streamName(stream)}</b>
+              <span>${stream}</span>
+              <small>${streamNote(stream)}</small>
+            </span>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderCards(items, activeStreams = []) {
   const el = document.querySelector("#cards");
   const preferred = [
-    "contract_ping",
-    "spot_order_test",
-    "spot_bbo",
-    "spot_trades",
-    "spot_l2",
     "extended_rest",
     "extended_bbo",
     "extended_l2",
@@ -192,13 +253,15 @@ function renderCards(items, activeStreams = []) {
   el.innerHTML = ordered
     .map((stream) => {
       const item = byStream.get(stream);
-      const title = streamNames[stream] || stream;
+      const title = streamName(stream);
       const p95 = item ? item.p95_ms : null;
       return `
         <article class="card">
-          <div class="card-title"><span>${title}</span><span>${metricNames[item?.metric_type] || item?.metric_type || "-"}</span></div>
+          <div class="card-title"><span>${title}</span><span>${metricNames[item?.metric_type] || item?.metric_type || "等待采样"}</span></div>
+          <div class="stream-key">${stream}</div>
           <div class="metric ${quality(p95)}">${fmt(p95)} ms</div>
           <div class="window-note">${windowLabel(item?.window_s)}</div>
+          <div class="stream-note">${streamNote(stream)}</div>
           <div class="submetrics">
             <span>p50 <b>${fmt(item?.p50_ms)}</b></span>
             <span>p99 <b>${fmt(item?.p99_ms)}</b></span>
@@ -220,7 +283,7 @@ function renderSummary(items) {
     .map(
       (item) => `
       <tr>
-        <td>${streamNames[item.stream] || item.stream}</td>
+        <td>${streamLabel(item.stream)}</td>
         <td>${fmt(item.p50_ms)}</td>
         <td>${fmt(item.p95_ms)}</td>
         <td>${fmt(item.p99_ms)}</td>
@@ -232,7 +295,7 @@ function renderSummary(items) {
 }
 
 function incidentText(item) {
-  const stream = streamNames[item.stream] || item.stream;
+  const stream = streamLabel(item.stream);
   const type = {
     connect: "连接成功",
     timeout: "超时",
@@ -261,13 +324,7 @@ function incidentText(item) {
     return { title: `${stream} ${type}`, detail: connectMs ? `连接耗时 ${fmt(connectMs, 2)} ms` : item.message };
   }
   if (item.type === "timeout") {
-    const timeoutText =
-      item.stream === "contract_ping"
-        ? "5 秒内没有收到 pong"
-        : item.stream === "spot_order_test"
-          ? "测试请求超时"
-          : "10 秒内没有收到消息";
-    return { title: `${stream} ${type}`, detail: timeoutText };
+    return { title: `${stream} ${type}`, detail: item.message || "请求或消息接收超时" };
   }
   if (item.type === "gap_spike") {
     return { title: `${stream} ${type}`, detail: `最大消息间隔 ${fmt(extra.max_ms, 2)} ms` };
@@ -323,7 +380,7 @@ function buildChart(items) {
   const datasets = streams.map((stream) => {
     const rows = items.filter((item) => item.stream === stream).sort((a, b) => a.ts_ms - b.ts_ms);
     return {
-      label: streamNames[stream] || stream,
+      label: streamLabel(stream),
       data: rows.map((item) => ({
         x: item.ts_ms,
         y: item.p95_ms,
@@ -395,9 +452,10 @@ async function refreshAll() {
   state.lastRange = series.range;
   document.querySelector("#region").textContent = `region: ${status.region}`;
   document.querySelector("#symbol").textContent =
-    `symbol: ${status.symbol} / extended: ${status.extended_market} (${status.extended_env})`;
+    `市场: ${status.extended_market} / 环境: ${status.extended_env}`;
   renderPlacement(status.placement);
   state.streams = status.streams;
+  renderActiveStreams(status.streams);
   renderCards(status.latest, state.streams);
   buildChart(series.items);
   renderSummary(summary.items);

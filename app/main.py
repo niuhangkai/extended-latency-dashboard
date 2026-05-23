@@ -216,7 +216,6 @@ async def index() -> FileResponse:
 async def status() -> dict[str, Any]:
     return {
         "region": settings.region,
-        "symbol": settings.symbol,
         "extended_market": settings.extended_market,
         "extended_env": settings.extended_env,
         "streams": sorted(settings.streams),
