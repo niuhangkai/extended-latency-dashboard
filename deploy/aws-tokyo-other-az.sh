@@ -18,13 +18,45 @@ EXTENDED_STARK_PRIVATE_KEY="${EXTENDED_STARK_PRIVATE_KEY:-替换_EXTENDED_STARK_
 EXTENDED_VAULT="${EXTENDED_VAULT:-替换_EXTENDED_VAULT}"
 EXTENDED_CLIENT_ID="${EXTENDED_CLIENT_ID:-}"
 
+install_runtime() {
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    sudo apt-get update
+    sudo apt-get install -y ca-certificates curl git
+    if ! command -v docker >/dev/null 2>&1; then
+      curl -fsSL https://get.docker.com | sudo sh
+    fi
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y ca-certificates curl git docker
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y ca-certificates curl git docker
+  else
+    echo "Unsupported Linux: apt-get/dnf/yum not found" >&2
+    exit 1
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl enable --now docker
+  else
+    sudo service docker start 2>/dev/null || true
+  fi
+
+  if ! sudo docker compose version >/dev/null 2>&1; then
+    compose_arch="$(uname -m)"
+    case "$compose_arch" in
+      x86_64) compose_arch="x86_64" ;;
+      aarch64|arm64) compose_arch="aarch64" ;;
+      *) echo "Unsupported Docker Compose arch: $compose_arch" >&2; exit 1 ;;
+    esac
+    sudo mkdir -p /usr/local/lib/docker/cli-plugins
+    sudo curl -fsSL "https://github.com/docker/compose/releases/download/v2.36.2/docker-compose-linux-$compose_arch" \
+      -o /usr/local/lib/docker/cli-plugins/docker-compose
+    sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+  fi
+}
+
 cd /tmp
-export DEBIAN_FRONTEND=noninteractive
-sudo apt update
-sudo apt install -y ca-certificates curl git
-if ! command -v docker >/dev/null 2>&1; then
-  curl -fsSL https://get.docker.com | sudo sh
-fi
+install_runtime
 
 TOKEN="$(curl -sX PUT http://169.254.169.254/latest/api/token \
   -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')"
