@@ -46,6 +46,7 @@ fi
 
 sudo rm -rf "$APP_DIR"
 sudo git clone "$REPO_URL" "$APP_DIR"
+sudo chown -R "$(id -u):$(id -g)" "$APP_DIR"
 cd "$APP_DIR"
 
 cat > .env <<EOF
