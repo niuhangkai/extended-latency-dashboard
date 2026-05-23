@@ -163,14 +163,58 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def series(self, since_ms: int, stream: str | None = None, streams: set[str] | None = None) -> list[dict[str, Any]]:
-        params: list[Any] = [since_ms]
-        where = "ts_ms >= ?"
+    def series(
+        self,
+        since_ms: int,
+        until_ms: int,
+        stream: str | None = None,
+        streams: set[str] | None = None,
+        bucket_ms: int | None = None,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = [since_ms, until_ms]
+        where = "ts_ms >= ? AND ts_ms <= ?"
         if stream:
             where += " AND stream = ?"
             params.append(stream)
         else:
             where += self._stream_filter(streams, params)
+
+        if bucket_ms and bucket_ms > 0:
+            bucket_params: list[Any] = [since_ms, bucket_ms, since_ms, bucket_ms, *params]
+            with self._lock:
+                rows = self._conn.execute(
+                    f"""
+                    SELECT
+                        (? + bucket * ?) AS ts_ms,
+                        region,
+                        stream,
+                        symbol,
+                        metric_type,
+                        ROUND(AVG(window_s), 3) AS window_s,
+                        SUM(count) AS count,
+                        ROUND(AVG(avg_ms), 3) AS avg_ms,
+                        ROUND(AVG(p50_ms), 3) AS p50_ms,
+                        ROUND(AVG(p95_ms), 3) AS p95_ms,
+                        ROUND(AVG(p99_ms), 3) AS p99_ms,
+                        ROUND(MAX(max_ms), 3) AS max_ms,
+                        SUM(messages) AS messages,
+                        SUM(bytes) AS bytes,
+                        MAX(reconnects) AS reconnects,
+                        SUM(timeouts) AS timeouts
+                    FROM (
+                        SELECT
+                            CAST((ts_ms - ?) / ? AS INTEGER) AS bucket,
+                            *
+                        FROM samples
+                        WHERE {where}
+                    )
+                    GROUP BY stream, metric_type, bucket
+                    ORDER BY ts_ms ASC
+                    """,
+                    bucket_params,
+                ).fetchall()
+            return [dict(row) for row in rows]
+
         with self._lock:
             rows = self._conn.execute(
                 f"""
@@ -183,8 +227,8 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def summary(self, since_ms: int, streams: set[str] | None = None) -> list[dict[str, Any]]:
-        params: list[Any] = [since_ms]
+    def summary(self, since_ms: int, until_ms: int, streams: set[str] | None = None) -> list[dict[str, Any]]:
+        params: list[Any] = [since_ms, until_ms]
         stream_filter = self._stream_filter(streams, params)
         with self._lock:
             rows = self._conn.execute(
@@ -204,7 +248,7 @@ class Storage:
                     MAX(reconnects) AS reconnects,
                     SUM(timeouts) AS timeouts
                 FROM samples
-                WHERE ts_ms >= ? {stream_filter}
+                WHERE ts_ms >= ? AND ts_ms <= ? {stream_filter}
                 GROUP BY stream, metric_type
                 ORDER BY stream
                 """,
@@ -212,8 +256,14 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def incidents(self, since_ms: int, streams: set[str] | None = None, limit: int = 200) -> list[dict[str, Any]]:
-        params: list[Any] = [since_ms]
+    def incidents(
+        self,
+        since_ms: int,
+        until_ms: int,
+        streams: set[str] | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = [since_ms, until_ms]
         stream_filter = self._stream_filter(streams, params)
         params.append(limit)
         with self._lock:
@@ -221,7 +271,7 @@ class Storage:
                 f"""
                 SELECT *
                 FROM incidents
-                WHERE ts_ms >= ? {stream_filter}
+                WHERE ts_ms >= ? AND ts_ms <= ? {stream_filter}
                 ORDER BY ts_ms DESC
                 LIMIT ?
                 """,

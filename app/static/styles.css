@@ -257,6 +257,32 @@ p {
   gap: 6px;
 }
 
+.chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.custom-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+input[type="datetime-local"] {
+  min-width: 155px;
+  color: var(--text);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-family: inherit;
+}
+
 button {
   color: var(--text);
   background: var(--panel-soft);
@@ -347,6 +373,13 @@ th {
 
   .placement-target {
     white-space: normal;
+  }
+
+  .panel-head,
+  .chart-toolbar,
+  .custom-range {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .chart-wrap,

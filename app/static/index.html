@@ -33,13 +33,21 @@
               <h2>实时曲线</h2>
               <p>RTT、消息 lag 与消息间隔；数值越低越稳。</p>
             </div>
-            <div class="controls">
-              <button data-minutes="15">15m</button>
-              <button data-minutes="60" class="active">1h</button>
-              <button data-minutes="360">6h</button>
-              <button data-minutes="1440">24h</button>
-              <button data-minutes="2880">48h</button>
-              <button data-minutes="4320">72h</button>
+            <div class="chart-toolbar">
+              <div class="controls">
+                <button data-minutes="15">15m</button>
+                <button data-minutes="60" class="active">1h</button>
+                <button data-minutes="360">6h</button>
+                <button data-minutes="1440">24h</button>
+                <button data-minutes="4320">72h</button>
+                <button data-minutes="10080">7d</button>
+              </div>
+              <div class="custom-range">
+                <input id="rangeStart" type="datetime-local" />
+                <span>至</span>
+                <input id="rangeEnd" type="datetime-local" />
+                <button id="applyRange">应用</button>
+              </div>
             </div>
           </div>
           <div class="chart-wrap">

@@ -1,8 +1,12 @@
 const state = {
   minutes: 60,
+  rangeMode: "preset",
+  sinceMs: null,
+  untilMs: null,
   streams: [],
   latest: new Map(),
   chart: null,
+  lastRange: null,
 };
 
 const colors = {
@@ -66,6 +70,27 @@ function timeLabel(ts) {
   return new Date(ts).toLocaleTimeString("zh-CN", { hour12: false });
 }
 
+function axisTimeLabel(ts) {
+  const options =
+    state.lastRange && state.lastRange.until_ms - state.lastRange.since_ms > 24 * 60 * 60 * 1000
+      ? { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }
+      : { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
+  return new Date(Number(ts)).toLocaleString("zh-CN", options);
+}
+
+function inputDateTime(ms) {
+  const date = new Date(ms);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function initRangeInputs() {
+  const end = Date.now();
+  const start = end - 60 * 60 * 1000;
+  document.querySelector("#rangeStart").value = inputDateTime(start);
+  document.querySelector("#rangeEnd").value = inputDateTime(end);
+}
+
 function quality(value) {
   if (value === null || value === undefined) return "";
   if (value < 50) return "good";
@@ -87,6 +112,13 @@ async function getJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} ${res.status}`);
   return res.json();
+}
+
+function rangeQuery() {
+  if (state.rangeMode === "custom" && state.sinceMs && state.untilMs) {
+    return `since_ms=${state.sinceMs}&until_ms=${state.untilMs}`;
+  }
+  return `minutes=${state.minutes}`;
 }
 
 function renderPlacement(placement) {
@@ -288,12 +320,18 @@ function buildChart(items) {
   if (!window.Chart) return;
 
   const streams = [...new Set(items.map((item) => item.stream))];
-  const labels = [...new Set(items.map((item) => item.ts_ms))].sort((a, b) => a - b);
   const datasets = streams.map((stream) => {
-    const byTs = new Map(items.filter((item) => item.stream === stream).map((item) => [item.ts_ms, item.p95_ms]));
+    const rows = items.filter((item) => item.stream === stream).sort((a, b) => a.ts_ms - b.ts_ms);
     return {
       label: streamNames[stream] || stream,
-      data: labels.map((ts) => byTs.get(ts) ?? null),
+      data: rows.map((item) => ({
+        x: item.ts_ms,
+        y: item.p95_ms,
+        max: item.max_ms,
+        p50: item.p50_ms,
+        p99: item.p99_ms,
+        messages: item.messages,
+      })),
       borderColor: colors[stream] || "#d7e1ee",
       backgroundColor: colors[stream] || "#d7e1ee",
       borderWidth: 2,
@@ -308,19 +346,37 @@ function buildChart(items) {
   state.chart = new Chart(ctx, {
     type: "line",
     data: {
-      labels: labels.map(timeLabel),
       datasets,
     },
     options: {
       animation: false,
       responsive: true,
       maintainAspectRatio: false,
+      parsing: false,
+      normalized: true,
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { labels: { color: "#d7e1ee" } },
+        tooltip: {
+          callbacks: {
+            title: (items) => (items[0] ? axisTimeLabel(items[0].parsed.x) : ""),
+            label: (item) => {
+              const raw = item.raw || {};
+              return `${item.dataset.label}: p95 ${fmt(raw.y)} ms / max ${fmt(raw.max)} ms / p99 ${fmt(raw.p99)} ms`;
+            },
+          },
+        },
       },
       scales: {
-        x: { ticks: { color: "#7d8da3", maxTicksLimit: 10 }, grid: { color: "rgba(29,42,58,0.55)" } },
+        x: {
+          type: "linear",
+          ticks: {
+            color: "#7d8da3",
+            maxTicksLimit: 9,
+            callback: (value) => axisTimeLabel(value),
+          },
+          grid: { color: "rgba(29,42,58,0.55)" },
+        },
         y: { ticks: { color: "#7d8da3" }, grid: { color: "rgba(29,42,58,0.55)" } },
       },
     },
@@ -328,13 +384,15 @@ function buildChart(items) {
 }
 
 async function refreshAll() {
+  const query = rangeQuery();
   const [status, series, summary, incidents] = await Promise.all([
     getJson("/api/status"),
-    getJson(`/api/series?minutes=${state.minutes}`),
-    getJson(`/api/summary?minutes=${state.minutes}`),
-    getJson(`/api/incidents?minutes=${state.minutes}`),
+    getJson(`/api/series?${query}`),
+    getJson(`/api/summary?${query}`),
+    getJson(`/api/incidents?${query}`),
   ]);
 
+  state.lastRange = series.range;
   document.querySelector("#region").textContent = `region: ${status.region}`;
   document.querySelector("#symbol").textContent =
     `symbol: ${status.symbol} / extended: ${status.extended_market} (${status.extended_env})`;
@@ -379,11 +437,26 @@ document.querySelectorAll("[data-minutes]").forEach((button) => {
   button.addEventListener("click", () => {
     document.querySelectorAll("[data-minutes]").forEach((node) => node.classList.remove("active"));
     button.classList.add("active");
+    state.rangeMode = "preset";
     state.minutes = Number(button.dataset.minutes);
     refreshAll();
   });
 });
 
+document.querySelector("#applyRange").addEventListener("click", () => {
+  const startValue = document.querySelector("#rangeStart").value;
+  const endValue = document.querySelector("#rangeEnd").value;
+  const start = startValue ? new Date(startValue).getTime() : NaN;
+  const end = endValue ? new Date(endValue).getTime() : NaN;
+  if (Number.isNaN(start) || Number.isNaN(end)) return;
+  state.rangeMode = "custom";
+  state.sinceMs = start;
+  state.untilMs = end;
+  document.querySelectorAll("[data-minutes]").forEach((node) => node.classList.remove("active"));
+  refreshAll();
+});
+
+initRangeInputs();
 refreshAll();
 connectWs();
 setInterval(refreshAll, 30000);

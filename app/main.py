@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -14,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.collector import ExchangeLatencyCollector
 from app.config import load_settings
 from app.storage import Storage
+from app.storage import now_ms
 
 
 settings = load_settings()
@@ -146,6 +146,49 @@ def placement_status() -> dict[str, Any]:
     return status
 
 
+def resolve_range(
+    minutes: int | None = 60,
+    since_ms: int | None = None,
+    until_ms: int | None = None,
+) -> tuple[int, int]:
+    end_ms = until_ms or now_ms()
+    if since_ms is not None:
+        start_ms = since_ms
+    else:
+        window_minutes = max(1, min(minutes or 60, 60 * 24 * 30))
+        start_ms = end_ms - window_minutes * 60 * 1000
+    if start_ms > end_ms:
+        start_ms, end_ms = end_ms, start_ms
+    return start_ms, end_ms
+
+
+def series_bucket_ms(since_ms: int, until_ms: int) -> int | None:
+    range_ms = max(1, until_ms - since_ms)
+    target_points_per_stream = 900
+    raw_step_ms = range_ms // target_points_per_stream
+    if raw_step_ms <= 10_000:
+        return None
+
+    minute = 60_000
+    buckets = [
+        15_000,
+        30_000,
+        minute,
+        2 * minute,
+        5 * minute,
+        10 * minute,
+        15 * minute,
+        30 * minute,
+        60 * minute,
+        2 * 60 * minute,
+        4 * 60 * minute,
+    ]
+    for bucket in buckets:
+        if raw_step_ms <= bucket:
+            return bucket
+    return buckets[-1]
+
+
 @app.on_event("startup")
 async def startup() -> None:
     global collector, placement
@@ -184,21 +227,39 @@ async def status() -> dict[str, Any]:
 
 
 @app.get("/api/series")
-async def series(minutes: int = 60, stream: Optional[str] = None) -> dict[str, Any]:
-    since_ms = int((time.time() - minutes * 60) * 1000)
-    return {"items": storage.series(since_ms, stream, settings.streams)}
+async def series(
+    minutes: int = 60,
+    stream: Optional[str] = None,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> dict[str, Any]:
+    start_ms, end_ms = resolve_range(minutes, since_ms, until_ms)
+    bucket_ms = series_bucket_ms(start_ms, end_ms)
+    return {
+        "items": storage.series(start_ms, end_ms, stream, settings.streams, bucket_ms),
+        "range": {"since_ms": start_ms, "until_ms": end_ms},
+        "bucket_ms": bucket_ms,
+    }
 
 
 @app.get("/api/summary")
-async def summary(minutes: int = 60) -> dict[str, Any]:
-    since_ms = int((time.time() - minutes * 60) * 1000)
-    return {"items": storage.summary(since_ms, settings.streams)}
+async def summary(
+    minutes: int = 60,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> dict[str, Any]:
+    start_ms, end_ms = resolve_range(minutes, since_ms, until_ms)
+    return {"items": storage.summary(start_ms, end_ms, settings.streams), "range": {"since_ms": start_ms, "until_ms": end_ms}}
 
 
 @app.get("/api/incidents")
-async def incidents(minutes: int = 60) -> dict[str, Any]:
-    since_ms = int((time.time() - minutes * 60) * 1000)
-    return {"items": storage.incidents(since_ms, settings.streams)}
+async def incidents(
+    minutes: int = 60,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> dict[str, Any]:
+    start_ms, end_ms = resolve_range(minutes, since_ms, until_ms)
+    return {"items": storage.incidents(start_ms, end_ms, settings.streams), "range": {"since_ms": start_ms, "until_ms": end_ms}}
 
 
 @app.websocket("/ws")
