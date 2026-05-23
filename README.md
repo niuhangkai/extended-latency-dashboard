@@ -15,8 +15,12 @@
 | `extended_order_place` | Extended 下单 ACK | 测试下单 REST ACK |
 | `extended_order_cancel` | Extended 撤单 ACK | 测试撤单 REST ACK |
 | `extended_order_ws` | Extended 私有回报 | 私有 WebSocket 下单/撤单回报 |
+| `extended_fill_place` | Extended 实际成交下单 | IOC 可成交订单 REST ACK |
+| `extended_fill_ws` | Extended 实际成交回报 | 私有 WebSocket FILLED/PARTIALLY_FILLED 回报 |
 
 启用 `extended_order_test` 会自动打开 `extended_order_place`、`extended_order_cancel`、`extended_order_ws`。下单测试需要 Extended API key、Stark key、vault；建议先用 `EXTENDED_ENV=testnet`。
+
+启用 `extended_fill_test` 会发送 IOC 可成交订单，自动打开 `extended_fill_place`、`extended_fill_ws`。该测试默认只允许 `EXTENDED_ENV=testnet`；如果要在主网运行，必须显式设置 `EXTENDED_FILL_ALLOW_MAINNET=true`。
 
 ## 本地运行
 
@@ -119,6 +123,12 @@ bash deploy/vultr-tokyo.sh
 | `EXTENDED_VAULT` | 空 | 下单测试需要 |
 | `EXTENDED_ORDER_TEST_INTERVAL_SECONDS` | `15` | 下单/撤单测试间隔 |
 | `EXTENDED_ORDER_TEST_TIMEOUT_SECONDS` | `10` | 下单/撤单超时 |
+| `EXTENDED_FILL_TEST_SIDE` | `BUY` | 实际成交测试方向 |
+| `EXTENDED_FILL_TEST_QUANTITY` | 空 | 实际成交测试数量；空值使用最小下单量 |
+| `EXTENDED_FILL_TEST_PRICE_OFFSET_PCT` | `1` | IOC 穿盘口价格偏移百分比 |
+| `EXTENDED_FILL_TEST_INTERVAL_SECONDS` | `60` | 实际成交测试间隔 |
+| `EXTENDED_FILL_TEST_TIMEOUT_SECONDS` | `10` | 实际成交下单超时 |
+| `EXTENDED_FILL_ALLOW_MAINNET` | `false` | 是否允许主网实际成交测试 |
 
 ## 验证
 

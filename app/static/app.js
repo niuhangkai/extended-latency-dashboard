@@ -19,6 +19,8 @@ const colors = {
   extended_order_place: "#a78bfa",
   extended_order_cancel: "#facc15",
   extended_order_ws: "#22d3ee",
+  extended_fill_place: "#ef4444",
+  extended_fill_ws: "#f59e0b",
 };
 
 const streamMeta = {
@@ -62,6 +64,18 @@ const streamMeta = {
     name: "Extended 下单测试开关",
     note: "启用后采集下单 ACK、撤单 ACK、私有 WebSocket 回报",
   },
+  extended_fill_place: {
+    name: "Extended 实际成交下单",
+    note: "IOC 可成交订单 REST ACK",
+  },
+  extended_fill_ws: {
+    name: "Extended 实际成交回报",
+    note: "私有 WebSocket FILLED/PARTIALLY_FILLED 回报",
+  },
+  extended_fill_test: {
+    name: "Extended 实际成交开关",
+    note: "启用后发送 IOC 可成交订单，默认只允许测试网",
+  },
 };
 
 const metricNames = {
@@ -70,6 +84,8 @@ const metricNames = {
   cancel_ack: "撤单 ACK",
   order_ws_ack: "下单回报",
   cancel_ws_ack: "撤单回报",
+  fill_order_ack: "成交下单 ACK",
+  fill_ws_ack: "成交回报",
   rest_rtt: "REST RTT",
   event_lag: "消息 lag",
 };
@@ -216,6 +232,9 @@ function renderActiveStreams(streams) {
     "extended_order_place",
     "extended_order_cancel",
     "extended_order_ws",
+    "extended_fill_test",
+    "extended_fill_place",
+    "extended_fill_ws",
   ].filter((stream) => streams.includes(stream));
 
   el.innerHTML = `
@@ -248,6 +267,8 @@ function renderCards(items, activeStreams = []) {
     "extended_order_place",
     "extended_order_cancel",
     "extended_order_ws",
+    "extended_fill_place",
+    "extended_fill_ws",
   ];
   const byStream = new Map(items.map((item) => [item.stream, item]));
   const active = new Set([...activeStreams, ...byStream.keys()]);
@@ -334,6 +355,7 @@ function incidentText(item) {
     order_test_spike: "模拟下单尖峰",
     extended_rest_error: "Extended REST 失败",
     extended_order_error: "Extended 下单测试失败",
+    extended_fill_error: "Extended 实际成交测试失败",
     extended_lag_spike: "Extended 消息 lag 尖峰",
     config_error: "配置错误",
     error: "连接错误",
@@ -370,6 +392,9 @@ function incidentText(item) {
     return { title: `${stream} ${type}`, detail: item.message };
   }
   if (item.type === "extended_order_error") {
+    return { title: `${stream} ${type}`, detail: item.message };
+  }
+  if (item.type === "extended_fill_error") {
     return { title: `${stream} ${type}`, detail: item.message };
   }
   if (item.type === "extended_lag_spike") {

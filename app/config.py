@@ -39,6 +39,13 @@ class Settings:
     extended_order_test_interval_seconds: int
     extended_order_test_timeout_seconds: int
     extended_order_test_taker_fee: str
+    extended_fill_test_side: str
+    extended_fill_test_quantity: str
+    extended_fill_test_price_offset_pct: str
+    extended_fill_test_interval_seconds: int
+    extended_fill_test_timeout_seconds: int
+    extended_fill_test_taker_fee: str
+    extended_fill_allow_mainnet: bool
 
 
 def load_settings() -> Settings:
@@ -49,6 +56,8 @@ def load_settings() -> Settings:
     }
     if "extended_order_test" in streams:
         streams.update({"extended_order_place", "extended_order_cancel", "extended_order_ws"})
+    if "extended_fill_test" in streams:
+        streams.update({"extended_fill_place", "extended_fill_ws"})
     return Settings(
         region=os.getenv("EXCHANGE_REGION", "local"),
         streams=streams,
@@ -69,4 +78,11 @@ def load_settings() -> Settings:
         extended_order_test_interval_seconds=max(1, int(os.getenv("EXTENDED_ORDER_TEST_INTERVAL_SECONDS", "15"))),
         extended_order_test_timeout_seconds=max(1, int(os.getenv("EXTENDED_ORDER_TEST_TIMEOUT_SECONDS", "10"))),
         extended_order_test_taker_fee=os.getenv("EXTENDED_ORDER_TEST_TAKER_FEE", "0.00025"),
+        extended_fill_test_side=os.getenv("EXTENDED_FILL_TEST_SIDE", "BUY").upper(),
+        extended_fill_test_quantity=os.getenv("EXTENDED_FILL_TEST_QUANTITY", ""),
+        extended_fill_test_price_offset_pct=os.getenv("EXTENDED_FILL_TEST_PRICE_OFFSET_PCT", "1"),
+        extended_fill_test_interval_seconds=max(1, int(os.getenv("EXTENDED_FILL_TEST_INTERVAL_SECONDS", "60"))),
+        extended_fill_test_timeout_seconds=max(1, int(os.getenv("EXTENDED_FILL_TEST_TIMEOUT_SECONDS", "10"))),
+        extended_fill_test_taker_fee=os.getenv("EXTENDED_FILL_TEST_TAKER_FEE", "0.00025"),
+        extended_fill_allow_mainnet=os.getenv("EXTENDED_FILL_ALLOW_MAINNET", "").lower() in {"1", "true", "yes"},
     )

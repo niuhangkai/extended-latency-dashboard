@@ -315,7 +315,13 @@ class Storage:
                     SUM(CASE WHEN severity = 'warning' THEN 1 ELSE 0 END) AS warnings,
                     SUM(CASE WHEN type = 'timeout' THEN 1 ELSE 0 END) AS timeout_events,
                     SUM(CASE WHEN type = 'connect' THEN 1 ELSE 0 END) AS connect_events,
-                    SUM(CASE WHEN type IN ('error', 'extended_rest_error', 'extended_order_error', 'config_error') THEN 1 ELSE 0 END)
+                    SUM(CASE WHEN type IN (
+                        'error',
+                        'extended_rest_error',
+                        'extended_order_error',
+                        'extended_fill_error',
+                        'config_error'
+                    ) THEN 1 ELSE 0 END)
                         AS failure_events
                 FROM incidents
                 WHERE ts_ms >= ? AND ts_ms <= ? {incident_filter}

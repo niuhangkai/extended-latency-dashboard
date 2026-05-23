@@ -87,6 +87,7 @@ class ExchangeLatencyCollector:
         self.tasks: list[asyncio.Task[Any]] = []
         self.extended_order_submitted_at: dict[str, float] = {}
         self.extended_cancel_submitted_at: dict[str, float] = {}
+        self.extended_fill_submitted_at: dict[str, float] = {}
 
     @property
     def extended_rest_url(self) -> str:
@@ -151,6 +152,9 @@ class ExchangeLatencyCollector:
             )
         if "extended_order_test" in self.settings.streams:
             self.tasks.append(asyncio.create_task(self._extended_order_test()))
+        if "extended_fill_test" in self.settings.streams:
+            self.tasks.append(asyncio.create_task(self._extended_fill_test()))
+        if "extended_order_test" in self.settings.streams or "extended_fill_test" in self.settings.streams:
             self.tasks.append(asyncio.create_task(self._extended_account_stream()))
 
     async def stop(self) -> None:
@@ -403,6 +407,7 @@ class ExchangeLatencyCollector:
         latency_ms: float,
         messages: int = 1,
         timeouts: int = 0,
+        window_s: float | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         sample = {
@@ -411,7 +416,7 @@ class ExchangeLatencyCollector:
             "stream": stream,
             "symbol": self.settings.extended_market,
             "metric_type": metric_type,
-            "window_s": self.settings.extended_order_test_interval_seconds,
+            "window_s": window_s or self.settings.extended_order_test_interval_seconds,
             "messages": messages,
             "bytes": 0,
             "reconnects": 0,
@@ -430,6 +435,11 @@ class ExchangeLatencyCollector:
         from x10.models.order import OrderSide
 
         return OrderSide.SELL if self.settings.extended_order_test_side == "SELL" else OrderSide.BUY
+
+    def _extended_fill_side(self) -> Any:
+        from x10.models.order import OrderSide
+
+        return OrderSide.SELL if self.settings.extended_fill_test_side == "SELL" else OrderSide.BUY
 
     async def _create_extended_client(self) -> Any:
         from x10.config import MAINNET_CONFIG, TESTNET_CONFIG
@@ -457,9 +467,26 @@ class ExchangeLatencyCollector:
             raw_price = ref * (Decimal("1") + offset)
         return market.trading_config.round_price(raw_price)
 
+    def _extended_fill_price(self, market: Any, side: Any) -> Decimal:
+        from x10.models.order import OrderSide
+
+        offset = Decimal(self.settings.extended_fill_test_price_offset_pct) / Decimal("100")
+        if side == OrderSide.BUY:
+            ref = Decimal(market.market_stats.ask_price)
+            raw_price = ref * (Decimal("1") + offset)
+        else:
+            ref = Decimal(market.market_stats.bid_price)
+            raw_price = ref * (Decimal("1") - offset)
+        return market.trading_config.round_price(raw_price)
+
     def _extended_order_quantity(self, market: Any) -> Decimal:
         if self.settings.extended_order_test_quantity:
             return market.trading_config.round_order_size(Decimal(self.settings.extended_order_test_quantity))
+        return Decimal(market.trading_config.min_order_size)
+
+    def _extended_fill_quantity(self, market: Any) -> Decimal:
+        if self.settings.extended_fill_test_quantity:
+            return market.trading_config.round_order_size(Decimal(self.settings.extended_fill_test_quantity))
         return Decimal(market.trading_config.min_order_size)
 
     async def _extended_account_stream(self) -> None:
@@ -518,6 +545,34 @@ class ExchangeLatencyCollector:
                                     metric_type="cancel_ws_ack",
                                     latency_ms=(now_t - cancel_submitted) * 1000,
                                     extra={"external_id": external_id, "status": str(status)},
+                                )
+                            fill_submitted = self.extended_fill_submitted_at.get(external_id)
+                            if fill_submitted is not None and status in {OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED}:
+                                self.extended_fill_submitted_at.pop(external_id, None)
+                                await self._save_extended_order_sample(
+                                    stream="extended_fill_ws",
+                                    metric_type="fill_ws_ack",
+                                    latency_ms=(now_t - fill_submitted) * 1000,
+                                    window_s=self.settings.extended_fill_test_interval_seconds,
+                                    extra={"external_id": external_id, "status": str(status)},
+                                )
+                            elif fill_submitted is not None and status in {
+                                OrderStatus.REJECTED,
+                                OrderStatus.EXPIRED,
+                                OrderStatus.CANCELLED,
+                            }:
+                                self.extended_fill_submitted_at.pop(external_id, None)
+                                await self._save_incident(
+                                    {
+                                        "ts_ms": now_ms(),
+                                        "region": self.settings.region,
+                                        "stream": "extended_fill_ws",
+                                        "symbol": self.settings.extended_market,
+                                        "severity": "warning",
+                                        "type": "extended_fill_error",
+                                        "message": f"Extended 实际成交订单未成交，状态 {status}",
+                                        "extra": {"external_id": external_id, "status": str(status)},
+                                    }
                                 )
             except asyncio.CancelledError:
                 raise
@@ -701,6 +756,168 @@ class ExchangeLatencyCollector:
                     "symbol": self.settings.extended_market,
                     "severity": "error",
                     "type": "extended_order_error",
+                    "message": repr(exc),
+                    "extra": {},
+                }
+            )
+        finally:
+            if client is not None:
+                await client.close()
+
+    async def _extended_fill_test(self) -> None:
+        stream = "extended_fill_place"
+        missing = self._extended_order_config_errors()
+        if missing:
+            await self._save_incident(
+                {
+                    "ts_ms": now_ms(),
+                    "region": self.settings.region,
+                    "stream": stream,
+                    "symbol": self.settings.extended_market,
+                    "severity": "error",
+                    "type": "config_error",
+                    "message": f"Extended 实际成交测试缺少配置：{', '.join(missing)}",
+                    "extra": {"missing": missing},
+                }
+            )
+            return
+        if self.settings.extended_env != "testnet" and not self.settings.extended_fill_allow_mainnet:
+            await self._save_incident(
+                {
+                    "ts_ms": now_ms(),
+                    "region": self.settings.region,
+                    "stream": stream,
+                    "symbol": self.settings.extended_market,
+                    "severity": "error",
+                    "type": "config_error",
+                    "message": "实际成交测试默认只允许 testnet；主网必须显式设置 EXTENDED_FILL_ALLOW_MAINNET=true",
+                    "extra": {"env": self.settings.extended_env},
+                }
+            )
+            return
+
+        client = None
+        try:
+            from x10.models.order import TimeInForce
+
+            client = await self._create_extended_client()
+            markets = await client.markets_info.get_markets_dict()
+            market = markets[self.settings.extended_market]
+
+            await self._save_incident(
+                {
+                    "ts_ms": now_ms(),
+                    "region": self.settings.region,
+                    "stream": stream,
+                    "symbol": self.settings.extended_market,
+                    "severity": "info",
+                    "type": "connect",
+                    "message": "Extended 实际成交测试启动成功",
+                    "extra": {"env": self.settings.extended_env, "market": self.settings.extended_market},
+                }
+            )
+
+            while not self.stop_event.is_set():
+                external_id = f"fill-{self.settings.region}-{uuid4().hex[:23]}"
+                placed_order_id: int | None = None
+                try:
+                    side = self._extended_fill_side()
+                    quantity = self._extended_fill_quantity(market)
+                    price = self._extended_fill_price(market, side)
+
+                    submit_t = time.perf_counter()
+                    self.extended_fill_submitted_at[external_id] = submit_t
+                    placed = await asyncio.wait_for(
+                        client.place_order(
+                            market_name=self.settings.extended_market,
+                            amount_of_synthetic=quantity,
+                            price=price,
+                            side=side,
+                            taker_fee=Decimal(self.settings.extended_fill_test_taker_fee),
+                            post_only=False,
+                            time_in_force=TimeInForce.IOC,
+                            external_id=external_id,
+                        ),
+                        timeout=self.settings.extended_fill_test_timeout_seconds,
+                    )
+                    place_ms = (time.perf_counter() - submit_t) * 1000
+                    placed_order_id = int(placed.data.id)
+                    await self._save_extended_order_sample(
+                        stream="extended_fill_place",
+                        metric_type="fill_order_ack",
+                        latency_ms=place_ms,
+                        window_s=self.settings.extended_fill_test_interval_seconds,
+                        extra={
+                            "external_id": external_id,
+                            "order_id": placed_order_id,
+                            "side": str(side),
+                            "quantity": str(quantity),
+                            "price": str(price),
+                            "time_in_force": "IOC",
+                        },
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except asyncio.TimeoutError:
+                    self.extended_fill_submitted_at.pop(external_id, None)
+                    await self._save_extended_order_sample(
+                        stream="extended_fill_place",
+                        metric_type="fill_order_ack",
+                        latency_ms=0,
+                        timeouts=1,
+                        window_s=self.settings.extended_fill_test_interval_seconds,
+                        extra={"external_id": external_id, "order_id": placed_order_id},
+                    )
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.extended_market,
+                            "severity": "warning",
+                            "type": "timeout",
+                            "message": "Extended 实际成交下单请求超时",
+                            "extra": {"external_id": external_id, "order_id": placed_order_id},
+                        }
+                    )
+                except Exception as exc:
+                    self.extended_fill_submitted_at.pop(external_id, None)
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.extended_market,
+                            "severity": "error",
+                            "type": "extended_fill_error",
+                            "message": repr(exc),
+                            "extra": {"external_id": external_id, "order_id": placed_order_id},
+                        }
+                    )
+                finally:
+                    stale_before = time.perf_counter() - 300
+                    self.extended_fill_submitted_at = {
+                        key: value for key, value in self.extended_fill_submitted_at.items() if value > stale_before
+                    }
+
+                try:
+                    await asyncio.wait_for(
+                        self.stop_event.wait(),
+                        timeout=self.settings.extended_fill_test_interval_seconds,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._save_incident(
+                {
+                    "ts_ms": now_ms(),
+                    "region": self.settings.region,
+                    "stream": stream,
+                    "symbol": self.settings.extended_market,
+                    "severity": "error",
+                    "type": "extended_fill_error",
                     "message": repr(exc),
                     "extra": {},
                 }
