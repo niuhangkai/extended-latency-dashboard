@@ -83,7 +83,7 @@ def load_settings() -> Settings:
         extended_order_test_taker_fee=os.getenv("EXTENDED_ORDER_TEST_TAKER_FEE", ""),
         extended_fill_test_side=os.getenv("EXTENDED_FILL_TEST_SIDE", "BUY").upper(),
         extended_fill_test_quantity=os.getenv("EXTENDED_FILL_TEST_QUANTITY", ""),
-        extended_fill_test_price_offset_pct=os.getenv("EXTENDED_FILL_TEST_PRICE_OFFSET_PCT", "1"),
+        extended_fill_test_price_offset_pct=os.getenv("EXTENDED_FILL_TEST_PRICE_OFFSET_PCT", "0"),
         extended_fill_test_interval_seconds=max(1, int(os.getenv("EXTENDED_FILL_TEST_INTERVAL_SECONDS", "60"))),
         extended_fill_test_timeout_seconds=max(1, int(os.getenv("EXTENDED_FILL_TEST_TIMEOUT_SECONDS", "10"))),
         extended_fill_test_taker_fee=os.getenv("EXTENDED_FILL_TEST_TAKER_FEE", ""),

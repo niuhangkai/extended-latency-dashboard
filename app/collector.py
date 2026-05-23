@@ -6,7 +6,7 @@ import statistics
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
@@ -520,18 +520,6 @@ class ExchangeLatencyCollector:
             raw_price = ref * (Decimal("1") + offset)
         return market.trading_config.round_price(raw_price)
 
-    def _extended_fill_price(self, market: Any, side: Any) -> Decimal:
-        from x10.models.order import OrderSide
-
-        offset = Decimal(self.settings.extended_fill_test_price_offset_pct) / Decimal("100")
-        if side == OrderSide.BUY:
-            ref = Decimal(market.market_stats.ask_price)
-            raw_price = ref * (Decimal("1") + offset)
-        else:
-            ref = Decimal(market.market_stats.bid_price)
-            raw_price = ref * (Decimal("1") - offset)
-        return market.trading_config.round_price(raw_price)
-
     def _extended_order_quantity(self, market: Any) -> Decimal:
         if self.settings.extended_order_test_quantity:
             return market.trading_config.round_order_size(Decimal(self.settings.extended_order_test_quantity))
@@ -550,6 +538,42 @@ class ExchangeLatencyCollector:
             if getattr(fee, "market", "") == self.settings.extended_market:
                 return Decimal(getattr(fee, "taker_fee_rate"))
         raise ValueError(f"Extended 未返回 {self.settings.extended_market} 的 taker fee")
+
+    def _extended_simple_fill_order(self, market: Any) -> tuple[Any, Decimal, dict[str, str]]:
+        from x10.models.order import OrderSide
+
+        mark = Decimal(market.market_stats.mark_price)
+        ask = Decimal(market.market_stats.ask_price)
+        bid = Decimal(market.market_stats.bid_price)
+        cap = Decimal(market.trading_config.limit_price_cap)
+        floor = Decimal(market.trading_config.limit_price_floor)
+        max_buy = market.trading_config.round_price(mark * (Decimal("1") + cap), ROUND_FLOOR)
+        min_sell = market.trading_config.round_price(mark * (Decimal("1") - floor), ROUND_CEILING)
+
+        if ask > 0 and ask <= max_buy:
+            price = market.trading_config.round_price(ask, ROUND_CEILING)
+            return OrderSide.BUY, price, {
+                "reason": "ask within mark price cap",
+                "ask": str(ask),
+                "bid": str(bid),
+                "mark": str(mark),
+                "max_buy": str(max_buy),
+                "min_sell": str(min_sell),
+            }
+        if bid > 0 and bid >= min_sell:
+            price = market.trading_config.round_price(bid, ROUND_FLOOR)
+            return OrderSide.SELL, price, {
+                "reason": "bid within mark price floor",
+                "ask": str(ask),
+                "bid": str(bid),
+                "mark": str(mark),
+                "max_buy": str(max_buy),
+                "min_sell": str(min_sell),
+            }
+        raise ValueError(
+            "Extended 实际成交测试跳过：盘口超出 mark 价格保护范围 "
+            f"(bid={bid}, ask={ask}, mark={mark}, min_sell={min_sell}, max_buy={max_buy})"
+        )
 
     async def _extended_account_stream(self) -> None:
         stream = "extended_order_ws"
@@ -894,9 +918,10 @@ class ExchangeLatencyCollector:
                 external_id = f"fill-{self.settings.region}-{uuid4().hex[:23]}"
                 placed_order_id: int | None = None
                 try:
-                    side = self._extended_fill_side()
+                    markets = await client.markets_info.get_markets_dict()
+                    market = markets[self.settings.extended_market]
                     quantity = self._extended_fill_quantity(market)
-                    price = self._extended_fill_price(market, side)
+                    side, price, price_extra = self._extended_simple_fill_order(market)
 
                     submit_t = time.perf_counter()
                     self.extended_fill_submitted_at[external_id] = submit_t
@@ -927,6 +952,7 @@ class ExchangeLatencyCollector:
                             "quantity": str(quantity),
                             "price": str(price),
                             "time_in_force": "IOC",
+                            **price_extra,
                         },
                     )
                 except asyncio.CancelledError:

@@ -126,7 +126,7 @@ bash deploy/vultr-tokyo.sh
 | `EXTENDED_ORDER_TEST_TIMEOUT_SECONDS` | `10` | 下单/撤单超时 |
 | `EXTENDED_FILL_TEST_SIDE` | `BUY` | 实际成交测试方向 |
 | `EXTENDED_FILL_TEST_QUANTITY` | 空 | 实际成交测试数量；空值使用最小下单量 |
-| `EXTENDED_FILL_TEST_PRICE_OFFSET_PCT` | `1` | IOC 穿盘口价格偏移百分比 |
+| `EXTENDED_FILL_TEST_PRICE_OFFSET_PCT` | `0` | 兼容旧配置；实际成交测试现在直接使用合法盘口价 |
 | `EXTENDED_FILL_TEST_INTERVAL_SECONDS` | `60` | 实际成交测试间隔 |
 | `EXTENDED_FILL_TEST_TIMEOUT_SECONDS` | `10` | 实际成交下单超时 |
 | `EXTENDED_FILL_ALLOW_MAINNET` | `false` | 是否允许主网实际成交测试 |
