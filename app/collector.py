@@ -9,9 +9,11 @@ import statistics
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
 from urllib.parse import urlencode
+from uuid import uuid4
 
 import httpx
 import websockets
@@ -25,6 +27,8 @@ SPOT_REST_URL = "https://api.mexc.com"
 CONTRACT_WS_URL = "wss://contract.mexc.com/edge"
 EXTENDED_REST_URL = "https://api.starknet.extended.exchange/api/v1"
 EXTENDED_WS_URL = "wss://api.starknet.extended.exchange/stream.extended.exchange/v1"
+EXTENDED_TESTNET_REST_URL = "https://api.starknet.sepolia.extended.exchange/api/v1"
+EXTENDED_TESTNET_WS_URL = "wss://api.starknet.sepolia.extended.exchange/stream.extended.exchange/v1"
 
 Broadcast = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -80,13 +84,23 @@ class Window:
         }
 
 
-class MexcLatencyCollector:
+class ExchangeLatencyCollector:
     def __init__(self, settings: Settings, storage: Storage, broadcast: Broadcast) -> None:
         self.settings = settings
         self.storage = storage
         self.broadcast = broadcast
         self.stop_event = asyncio.Event()
         self.tasks: list[asyncio.Task[Any]] = []
+        self.extended_order_submitted_at: dict[str, float] = {}
+        self.extended_cancel_submitted_at: dict[str, float] = {}
+
+    @property
+    def extended_rest_url(self) -> str:
+        return EXTENDED_TESTNET_REST_URL if self.settings.extended_env == "testnet" else EXTENDED_REST_URL
+
+    @property
+    def extended_ws_url(self) -> str:
+        return EXTENDED_TESTNET_WS_URL if self.settings.extended_env == "testnet" else EXTENDED_WS_URL
 
     async def start(self) -> None:
         if "spot_bbo" in self.settings.streams:
@@ -155,6 +169,9 @@ class MexcLatencyCollector:
                     )
                 )
             )
+        if "extended_order_test" in self.settings.streams:
+            self.tasks.append(asyncio.create_task(self._extended_order_test()))
+            self.tasks.append(asyncio.create_task(self._extended_account_stream()))
 
     async def stop(self) -> None:
         self.stop_event.set()
@@ -308,7 +325,7 @@ class MexcLatencyCollector:
         window = Window()
         report_started_at = time.time()
         timeout = httpx.Timeout(self.settings.extended_timeout_seconds)
-        async with httpx.AsyncClient(base_url=EXTENDED_REST_URL, timeout=timeout) as client:
+        async with httpx.AsyncClient(base_url=self.extended_rest_url, timeout=timeout) as client:
             while not self.stop_event.is_set():
                 try:
                     send_t = time.perf_counter()
@@ -395,7 +412,7 @@ class MexcLatencyCollector:
         window = Window()
         last_msg_at: float | None = None
         report_started_at = time.time()
-        url = f"{EXTENDED_WS_URL}/{path}"
+        url = f"{self.extended_ws_url}/{path}"
 
         while not self.stop_event.is_set():
             try:
@@ -497,6 +514,332 @@ class MexcLatencyCollector:
                     }
                 )
                 await asyncio.sleep(2)
+
+    def _extended_order_config_errors(self) -> list[str]:
+        missing = []
+        if not self.settings.extended_api_key:
+            missing.append("EXTENDED_API_KEY")
+        if not self.settings.extended_stark_public_key:
+            missing.append("EXTENDED_STARK_PUBLIC_KEY")
+        if not self.settings.extended_stark_private_key:
+            missing.append("EXTENDED_STARK_PRIVATE_KEY")
+        if not self.settings.extended_vault:
+            missing.append("EXTENDED_VAULT")
+        return missing
+
+    async def _save_extended_order_sample(
+        self,
+        *,
+        stream: str,
+        metric_type: str,
+        latency_ms: float,
+        messages: int = 1,
+        timeouts: int = 0,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        sample = {
+            "ts_ms": now_ms(),
+            "region": self.settings.region,
+            "stream": stream,
+            "symbol": self.settings.extended_market,
+            "metric_type": metric_type,
+            "window_s": self.settings.extended_order_test_interval_seconds,
+            "messages": messages,
+            "bytes": 0,
+            "reconnects": 0,
+            "timeouts": timeouts,
+            "count": 1 if timeouts == 0 else 0,
+            "avg_ms": rounded(latency_ms) if timeouts == 0 else None,
+            "p50_ms": rounded(latency_ms) if timeouts == 0 else None,
+            "p95_ms": rounded(latency_ms) if timeouts == 0 else None,
+            "p99_ms": rounded(latency_ms) if timeouts == 0 else None,
+            "max_ms": rounded(latency_ms) if timeouts == 0 else None,
+            "extra": extra or {},
+        }
+        await self._save_sample(sample)
+
+    def _extended_order_side(self) -> Any:
+        from x10.models.order import OrderSide
+
+        return OrderSide.SELL if self.settings.extended_order_test_side == "SELL" else OrderSide.BUY
+
+    async def _create_extended_client(self) -> Any:
+        from x10.config import MAINNET_CONFIG, TESTNET_CONFIG
+        from x10.core.stark_account import StarkPerpetualAccount
+        from x10.perpetual.trading_client import PerpetualTradingClient
+
+        config = TESTNET_CONFIG if self.settings.extended_env == "testnet" else MAINNET_CONFIG
+        account = StarkPerpetualAccount(
+            api_key=self.settings.extended_api_key,
+            public_key=self.settings.extended_stark_public_key.lower(),
+            private_key=self.settings.extended_stark_private_key.lower(),
+            vault=self.settings.extended_vault,
+        )
+        return PerpetualTradingClient(config, account)
+
+    def _extended_order_price(self, market: Any, side: Any) -> Decimal:
+        from x10.models.order import OrderSide
+
+        offset = Decimal(self.settings.extended_order_test_price_offset_pct) / Decimal("100")
+        if side == OrderSide.BUY:
+            ref = Decimal(market.market_stats.bid_price)
+            raw_price = ref * (Decimal("1") - offset)
+        else:
+            ref = Decimal(market.market_stats.ask_price)
+            raw_price = ref * (Decimal("1") + offset)
+        return market.trading_config.round_price(raw_price)
+
+    def _extended_order_quantity(self, market: Any) -> Decimal:
+        if self.settings.extended_order_test_quantity:
+            return market.trading_config.round_order_size(Decimal(self.settings.extended_order_test_quantity))
+        return Decimal(market.trading_config.min_order_size)
+
+    async def _extended_account_stream(self) -> None:
+        stream = "extended_order_ws"
+        if self._extended_order_config_errors():
+            return
+
+        reconnects = 0
+        while not self.stop_event.is_set():
+            try:
+                from x10.config import MAINNET_CONFIG, TESTNET_CONFIG
+                from x10.models.order import OrderStatus
+                from x10.perpetual.stream_client import PerpetualStreamClient
+
+                config = TESTNET_CONFIG if self.settings.extended_env == "testnet" else MAINNET_CONFIG
+                stream_client = PerpetualStreamClient(api_url=config.endpoints.stream_url)
+                reconnects += 1
+                connect_t0 = time.perf_counter()
+                async with stream_client.subscribe_to_account_updates(self.settings.extended_api_key) as account_stream:
+                    connect_ms = (time.perf_counter() - connect_t0) * 1000
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": stream,
+                            "symbol": self.settings.extended_market,
+                            "severity": "info",
+                            "type": "connect",
+                            "message": f"{stream} 连接成功，耗时 {connect_ms:.2f} ms",
+                            "extra": {"connect_ms": rounded(connect_ms), "reconnects": max(0, reconnects - 1)},
+                        }
+                    )
+
+                    while not self.stop_event.is_set():
+                        msg = await asyncio.wait_for(
+                            account_stream.recv(),
+                            timeout=self.settings.extended_order_test_timeout_seconds + 30,
+                        )
+                        orders = getattr(getattr(msg, "data", None), "orders", None) or []
+                        for order in orders:
+                            external_id = str(getattr(order, "external_id", "") or "")
+                            status = getattr(order, "status", None)
+                            now_t = time.perf_counter()
+                            submitted = self.extended_order_submitted_at.pop(external_id, None)
+                            if submitted is not None:
+                                await self._save_extended_order_sample(
+                                    stream=stream,
+                                    metric_type="order_ws_ack",
+                                    latency_ms=(now_t - submitted) * 1000,
+                                    extra={"external_id": external_id, "status": str(status)},
+                                )
+                            cancel_submitted = self.extended_cancel_submitted_at.pop(external_id, None)
+                            if cancel_submitted is not None and status == OrderStatus.CANCELLED:
+                                await self._save_extended_order_sample(
+                                    stream=stream,
+                                    metric_type="cancel_ws_ack",
+                                    latency_ms=(now_t - cancel_submitted) * 1000,
+                                    extra={"external_id": external_id, "status": str(status)},
+                                )
+            except asyncio.CancelledError:
+                raise
+            except asyncio.TimeoutError:
+                await self._save_incident(
+                    {
+                        "ts_ms": now_ms(),
+                        "region": self.settings.region,
+                        "stream": stream,
+                        "symbol": self.settings.extended_market,
+                        "severity": "warning",
+                        "type": "timeout",
+                        "message": "Extended 私有订单 WS 长时间没有收到消息",
+                        "extra": {},
+                    }
+                )
+            except Exception as exc:
+                await self._save_incident(
+                    {
+                        "ts_ms": now_ms(),
+                        "region": self.settings.region,
+                        "stream": stream,
+                        "symbol": self.settings.extended_market,
+                        "severity": "error",
+                        "type": "error",
+                        "message": repr(exc),
+                        "extra": {},
+                    }
+                )
+                await asyncio.sleep(2)
+
+    async def _extended_order_test(self) -> None:
+        stream = "extended_order_place"
+        missing = self._extended_order_config_errors()
+        if missing:
+            await self._save_incident(
+                {
+                    "ts_ms": now_ms(),
+                    "region": self.settings.region,
+                    "stream": stream,
+                    "symbol": self.settings.extended_market,
+                    "severity": "error",
+                    "type": "config_error",
+                    "message": f"Extended 下单测试缺少配置：{', '.join(missing)}",
+                    "extra": {"missing": missing},
+                }
+            )
+            return
+
+        client = None
+        try:
+            from x10.models.order import TimeInForce
+
+            client = await self._create_extended_client()
+            markets = await client.markets_info.get_markets_dict()
+            market = markets[self.settings.extended_market]
+
+            await self._save_incident(
+                {
+                    "ts_ms": now_ms(),
+                    "region": self.settings.region,
+                    "stream": stream,
+                    "symbol": self.settings.extended_market,
+                    "severity": "info",
+                    "type": "connect",
+                    "message": "Extended 下单测试启动成功",
+                    "extra": {"env": self.settings.extended_env, "market": self.settings.extended_market},
+                }
+            )
+
+            while not self.stop_event.is_set():
+                placed_order_id: int | None = None
+                external_id = f"lat-{self.settings.region}-{uuid4().hex[:24]}"
+                try:
+                    side = self._extended_order_side()
+                    quantity = self._extended_order_quantity(market)
+                    price = self._extended_order_price(market, side)
+
+                    submit_t = time.perf_counter()
+                    self.extended_order_submitted_at[external_id] = submit_t
+                    placed = await asyncio.wait_for(
+                        client.place_order(
+                            market_name=self.settings.extended_market,
+                            amount_of_synthetic=quantity,
+                            price=price,
+                            side=side,
+                            taker_fee=Decimal(self.settings.extended_order_test_taker_fee),
+                            post_only=True,
+                            time_in_force=TimeInForce.GTT,
+                            external_id=external_id,
+                        ),
+                        timeout=self.settings.extended_order_test_timeout_seconds,
+                    )
+                    place_ms = (time.perf_counter() - submit_t) * 1000
+                    placed_order_id = int(placed.data.id)
+                    await self._save_extended_order_sample(
+                        stream="extended_order_place",
+                        metric_type="order_ack",
+                        latency_ms=place_ms,
+                        extra={
+                            "external_id": external_id,
+                            "order_id": placed_order_id,
+                            "side": str(side),
+                            "quantity": str(quantity),
+                            "price": str(price),
+                        },
+                    )
+
+                    cancel_t = time.perf_counter()
+                    self.extended_cancel_submitted_at[external_id] = cancel_t
+                    await asyncio.wait_for(
+                        client.orders.cancel_order(placed_order_id),
+                        timeout=self.settings.extended_order_test_timeout_seconds,
+                    )
+                    cancel_ms = (time.perf_counter() - cancel_t) * 1000
+                    await self._save_extended_order_sample(
+                        stream="extended_order_cancel",
+                        metric_type="cancel_ack",
+                        latency_ms=cancel_ms,
+                        extra={"external_id": external_id, "order_id": placed_order_id},
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except asyncio.TimeoutError:
+                    await self._save_extended_order_sample(
+                        stream="extended_order_place",
+                        metric_type="order_ack",
+                        latency_ms=0,
+                        timeouts=1,
+                        extra={"external_id": external_id, "order_id": placed_order_id},
+                    )
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": "extended_order_place",
+                            "symbol": self.settings.extended_market,
+                            "severity": "warning",
+                            "type": "timeout",
+                            "message": "Extended 下单/撤单请求超时",
+                            "extra": {"external_id": external_id, "order_id": placed_order_id},
+                        }
+                    )
+                except Exception as exc:
+                    await self._save_incident(
+                        {
+                            "ts_ms": now_ms(),
+                            "region": self.settings.region,
+                            "stream": "extended_order_place",
+                            "symbol": self.settings.extended_market,
+                            "severity": "error",
+                            "type": "extended_order_error",
+                            "message": repr(exc),
+                            "extra": {"external_id": external_id, "order_id": placed_order_id},
+                        }
+                    )
+                finally:
+                    stale_before = time.perf_counter() - 300
+                    self.extended_order_submitted_at = {
+                        key: value for key, value in self.extended_order_submitted_at.items() if value > stale_before
+                    }
+                    self.extended_cancel_submitted_at = {
+                        key: value for key, value in self.extended_cancel_submitted_at.items() if value > stale_before
+                    }
+
+                try:
+                    await asyncio.wait_for(
+                        self.stop_event.wait(),
+                        timeout=self.settings.extended_order_test_interval_seconds,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._save_incident(
+                {
+                    "ts_ms": now_ms(),
+                    "region": self.settings.region,
+                    "stream": stream,
+                    "symbol": self.settings.extended_market,
+                    "severity": "error",
+                    "type": "extended_order_error",
+                    "message": repr(exc),
+                    "extra": {},
+                }
+            )
+        finally:
+            if client is not None:
+                await client.close()
 
     def _signed_order_test_body(self) -> str:
         params = [

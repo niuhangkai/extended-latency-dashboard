@@ -1,6 +1,6 @@
-# MEXC Latency Dashboard
+# Exchange Latency Dashboard
 
-用于在 VPS 节点上 7x24 监控 MEXC WebSocket 延迟和稳定性，并通过公网 IP 打开网页实时查看。
+用于在 VPS 节点上 7x24 监控交易所行情、REST 与测试下单延迟，并通过公网 IP 打开网页实时查看。
 
 ## 功能
 
@@ -8,13 +8,14 @@
 - 实时监控 MEXC 合约 WebSocket `ping/pong RTT`。
 - 可选监控 MEXC 现货 `POST /api/v3/order/test` 测试下单 ACK 耗时。
 - 可选监控 Extended REST RTT、BBO 消息 lag、L2/trades 消息间隔。
+- 可选监控 Extended 测试网真实下单 REST ACK、撤单 REST ACK、私有 WS 下单/撤单回报延迟。
 - SQLite 本地保存每个窗口的统计指标。
 - 记录异常：断连、重连、超时、消息间隔尖峰、RTT 尖峰。
 - 前端页面展示最新统计窗口、15m/1h/6h/24h/48h/72h 历史曲线、时间维度统计、异常日志。
 
 注意：本项目是节点质量监控，不是完整行情录制器。完整行情录制仍放在 `crypto-history-data`。
 
-顶部指标卡展示的是最新一个统计窗口，窗口长度由 `MEXC_REPORT_SECONDS` 控制，默认约 5 秒；右侧“时间维度”和主图才会跟随 15m/1h/6h/24h/48h/72h 按钮切换。
+顶部指标卡展示的是最新一个统计窗口，窗口长度由 `EXCHANGE_REPORT_SECONDS` 控制，默认约 5 秒；右侧“时间维度”和主图才会跟随 15m/1h/6h/24h/48h/72h 按钮切换。
 
 `spot_order_test` 使用 MEXC 现货测试下单接口，只校验订单参数，不进入撮合引擎。MEXC 官方文档说明当前 API 没有 sandbox/test 环境，所以这个指标代表“现货测试下单 ACK 耗时”，不是合约模拟盘真实撮合延迟。
 
@@ -23,11 +24,11 @@ Extended 官方 API 服务器位于 AWS Tokyo `ap-northeast-1a`。Extended 的 B
 ## 本地运行
 
 ```bash
-cd /Users/niuhangkai/Desktop/mexc-latency-dashboard
+cd /Users/niuhangkai/Desktop/exchange-latency-dashboard
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-MEXC_REGION=local MEXC_SYMBOL=BTCUSDT MEXC_REPORT_SECONDS=5 uvicorn app.main:app --host 0.0.0.0 --port 8080
+EXCHANGE_REGION=local EXCHANGE_SYMBOL=BTCUSDT EXCHANGE_REPORT_SECONDS=5 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
 打开：
@@ -39,7 +40,7 @@ http://127.0.0.1:8080
 ## Docker 运行
 
 ```bash
-cd /Users/niuhangkai/Desktop/mexc-latency-dashboard
+cd /Users/niuhangkai/Desktop/exchange-latency-dashboard
 docker compose up -d --build
 ```
 
@@ -96,6 +97,45 @@ APP_PORT=8080
 EXTENDED_MARKET=BTC-USD
 EXTENDED_REST_INTERVAL_SECONDS=1
 EXTENDED_TIMEOUT_SECONDS=5
+EOF
+
+docker compose up -d --build
+```
+
+## Extended 测试网下单延迟
+
+测试网下单需要在 Extended Testnet 的 API 管理页面创建 API Key，并把 API 密钥、Stark 公钥、Stark 私钥、金库号码填入服务器 `.env`。不要提交到 Git。
+
+建议使用远离盘口的 `post_only` 限价单，本项目默认 BUY 挂在 BBO bid 下方 10%，成交概率很低；下单成功后立即撤单。采集指标：
+
+- `extended_order_place`: 下单 REST ACK。
+- `extended_order_cancel`: 撤单 REST ACK。
+- `extended_order_ws`: 私有 WS 下单/撤单回报。
+
+```bash
+cat > .env <<'EOF'
+EXCHANGE_REGION=aws-tokyo
+EXCHANGE_SYMBOL=BTCUSDT
+EXCHANGE_STREAMS=extended_rest,extended_bbo,extended_l2,extended_order_test
+EXCHANGE_REPORT_SECONDS=5
+APP_PORT=8080
+
+EXTENDED_ENV=testnet
+EXTENDED_MARKET=BTC-USD
+EXTENDED_REST_INTERVAL_SECONDS=1
+EXTENDED_TIMEOUT_SECONDS=5
+
+EXTENDED_API_KEY=填你的测试网_API密钥
+EXTENDED_STARK_PUBLIC_KEY=填你的Stark公钥
+EXTENDED_STARK_PRIVATE_KEY=填你的Stark私钥
+EXTENDED_VAULT=填你的金库号码
+EXTENDED_CLIENT_ID=填你的客户端ID
+
+EXTENDED_ORDER_TEST_SIDE=BUY
+EXTENDED_ORDER_TEST_PRICE_OFFSET_PCT=10
+EXTENDED_ORDER_TEST_INTERVAL_SECONDS=15
+EXTENDED_ORDER_TEST_TIMEOUT_SECONDS=10
+EXTENDED_ORDER_TEST_TAKER_FEE=0.00025
 EOF
 
 docker compose up -d --build

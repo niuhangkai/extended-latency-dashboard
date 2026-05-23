@@ -2,3 +2,4 @@ fastapi>=0.110
 httpx>=0.27
 uvicorn[standard]>=0.27
 websockets>=12.0
+x10-python-trading-starknet==1.4.0

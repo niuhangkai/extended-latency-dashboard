@@ -9,7 +9,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.collector import MexcLatencyCollector
+from app.collector import ExchangeLatencyCollector
 from app.config import load_settings
 from app.storage import Storage
 
@@ -18,7 +18,7 @@ settings = load_settings()
 storage = Storage(settings.db_path)
 app = FastAPI(title="Exchange Latency Dashboard")
 clients: set[WebSocket] = set()
-collector: MexcLatencyCollector | None = None
+collector: ExchangeLatencyCollector | None = None
 
 
 async def broadcast(payload: dict[str, Any]) -> None:
@@ -35,7 +35,7 @@ async def broadcast(payload: dict[str, Any]) -> None:
 @app.on_event("startup")
 async def startup() -> None:
     global collector
-    collector = MexcLatencyCollector(settings, storage, broadcast)
+    collector = ExchangeLatencyCollector(settings, storage, broadcast)
     await collector.start()
 
 
@@ -60,6 +60,7 @@ async def status() -> dict[str, Any]:
         "region": settings.region,
         "symbol": settings.symbol,
         "extended_market": settings.extended_market,
+        "extended_env": settings.extended_env,
         "streams": sorted(settings.streams),
         "report_seconds": settings.report_seconds,
         "latest": storage.latest_samples(settings.streams),

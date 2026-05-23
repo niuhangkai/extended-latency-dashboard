@@ -15,6 +15,9 @@ const colors = {
   extended_bbo: "#34d399",
   extended_l2: "#60a5fa",
   extended_trades: "#f97316",
+  extended_order_place: "#a78bfa",
+  extended_order_cancel: "#facc15",
+  extended_order_ws: "#22d3ee",
 };
 
 const streamNames = {
@@ -27,12 +30,19 @@ const streamNames = {
   extended_bbo: "Extended BBO",
   extended_l2: "Extended L2",
   extended_trades: "Extended trades",
+  extended_order_place: "Extended 下单",
+  extended_order_cancel: "Extended 撤单",
+  extended_order_ws: "Extended 私有 WS",
 };
 
 const metricNames = {
   rtt: "RTT",
   message_gap: "消息间隔",
   order_test_ack: "ACK 耗时",
+  order_ack: "下单 ACK",
+  cancel_ack: "撤单 ACK",
+  order_ws_ack: "下单回报",
+  cancel_ws_ack: "撤单回报",
   rest_rtt: "REST RTT",
   event_lag: "消息 lag",
 };
@@ -83,6 +93,9 @@ function renderCards(items, activeStreams = []) {
     "extended_bbo",
     "extended_l2",
     "extended_trades",
+    "extended_order_place",
+    "extended_order_cancel",
+    "extended_order_ws",
   ];
   const byStream = new Map(items.map((item) => [item.stream, item]));
   const active = new Set([...activeStreams, ...byStream.keys()]);
@@ -140,6 +153,7 @@ function incidentText(item) {
     order_test_error: "模拟下单失败",
     order_test_spike: "模拟下单尖峰",
     extended_rest_error: "Extended REST 失败",
+    extended_order_error: "Extended 下单测试失败",
     extended_lag_spike: "Extended 消息 lag 尖峰",
     config_error: "配置错误",
     error: "连接错误",
@@ -179,6 +193,9 @@ function incidentText(item) {
     return { title: `${stream} ${type}`, detail: `最大 ACK 耗时 ${fmt(extra.max_ms, 2)} ms` };
   }
   if (item.type === "extended_rest_error") {
+    return { title: `${stream} ${type}`, detail: item.message };
+  }
+  if (item.type === "extended_order_error") {
     return { title: `${stream} ${type}`, detail: item.message };
   }
   if (item.type === "extended_lag_spike") {
@@ -262,7 +279,8 @@ async function refreshAll() {
   ]);
 
   document.querySelector("#region").textContent = `region: ${status.region}`;
-  document.querySelector("#symbol").textContent = `symbol: ${status.symbol} / extended: ${status.extended_market}`;
+  document.querySelector("#symbol").textContent =
+    `symbol: ${status.symbol} / extended: ${status.extended_market} (${status.extended_env})`;
   state.streams = status.streams;
   renderCards(status.latest, state.streams);
   buildChart(series.items);
