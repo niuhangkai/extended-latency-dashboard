@@ -79,10 +79,61 @@ function windowLabel(seconds) {
   return `最近 ${fmt(Number(seconds) / 60, 1)} 分钟`;
 }
 
+function valueOrDash(value) {
+  return value || "-";
+}
+
 async function getJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${url} ${res.status}`);
   return res.json();
+}
+
+function renderPlacement(placement) {
+  const el = document.querySelector("#placementBar");
+  if (!el) return;
+
+  const target = placement?.extended_target || {};
+  const match = placement?.az_match || "unknown";
+  const badge = {
+    same: ["same", "同 AZ"],
+    different: ["different", "不同 AZ"],
+    cross_cloud: ["neutral", "跨云节点"],
+    unknown: ["neutral", "未知"],
+  }[match] || ["neutral", "未知"];
+
+  const provider = placement?.provider === "aws" ? "AWS EC2" : placement?.provider === "vultr" ? "Vultr" : "未知节点";
+  const currentLines =
+    placement?.provider === "aws"
+      ? [
+          ["Subnet", placement.subnet_id],
+          ["AZ", placement.az],
+          ["AZ ID", placement.az_id],
+          ["VPC", placement.vpc_id],
+          ["Private IP", placement.private_ip],
+          ["Public IP", placement.public_ip],
+        ]
+      : [
+          ["Provider", provider],
+          ["Region", placement?.region],
+          ["说明", placement?.note],
+        ];
+
+  const fields = currentLines
+    .filter(([, value]) => value)
+    .map(([label, value]) => `<span><b>${label}</b> ${valueOrDash(value)}</span>`)
+    .join("");
+
+  el.innerHTML = `
+    <div class="placement-main">
+      <span class="placement-badge ${badge[0]}">${badge[1]}</span>
+      <span class="placement-title">${provider}</span>
+      <span class="placement-fields">${fields}</span>
+    </div>
+    <div class="placement-target">
+      Extended 目标: AWS ${valueOrDash(target.region)} / ${valueOrDash(target.az)} / ${valueOrDash(target.az_id)}
+    </div>
+  `;
 }
 
 function renderCards(items, activeStreams = []) {
@@ -287,6 +338,7 @@ async function refreshAll() {
   document.querySelector("#region").textContent = `region: ${status.region}`;
   document.querySelector("#symbol").textContent =
     `symbol: ${status.symbol} / extended: ${status.extended_market} (${status.extended_env})`;
+  renderPlacement(status.placement);
   state.streams = status.streams;
   renderCards(status.latest, state.streams);
   buildChart(series.items);

@@ -141,6 +141,26 @@ EOF
 docker compose up -d --build
 ```
 
+如果部署在 AWS EC2，页面会自动尝试读取实例 metadata 并显示 Subnet / AZ / AZ ID；若容器无法访问 metadata，可在宿主机先生成位置变量再启动：
+
+```bash
+TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+META="curl -s -H X-aws-ec2-metadata-token:$TOKEN http://169.254.169.254/latest"
+MAC=$($META/meta-data/network/interfaces/macs/ | head -1 | tr -d /)
+
+cat >> .env <<EOF
+EXCHANGE_CLOUD_PROVIDER=aws
+EXCHANGE_AWS_REGION=$($META/dynamic/instance-identity/document | sed -n 's/.*"region" : "\\([^"]*\\)".*/\\1/p')
+EXCHANGE_AWS_AZ=$($META/meta-data/placement/availability-zone)
+EXCHANGE_AWS_AZ_ID=$($META/meta-data/placement/availability-zone-id)
+EXCHANGE_AWS_SUBNET_ID=$($META/meta-data/network/interfaces/macs/$MAC/subnet-id)
+EXCHANGE_AWS_VPC_ID=$($META/meta-data/network/interfaces/macs/$MAC/vpc-id)
+EXCHANGE_PRIVATE_IP=$($META/meta-data/local-ipv4)
+EXCHANGE_PUBLIC_IP=$($META/meta-data/public-ipv4 2>/dev/null)
+EOF
+```
+
 Extended 主网 API：
 
 ```text
@@ -276,6 +296,12 @@ docker compose ps
 | `MEXC_ORDER_TEST_INTERVAL_SECONDS` | `10` | 测试下单请求间隔 |
 | `MEXC_ORDER_TEST_RECV_WINDOW_MS` | `5000` | 签名请求 recvWindow |
 | `MEXC_ORDER_TEST_TIMEOUT_SECONDS` | `5` | HTTP 请求超时秒数 |
+| `EXCHANGE_CLOUD_PROVIDER` | 空 | 可填 `aws` 或 `vultr`，用于页面位置显示 |
+| `EXCHANGE_AWS_REGION` | 空 | AWS 区域，例如 `ap-northeast-1` |
+| `EXCHANGE_AWS_AZ` | 空 | AWS 可用区名称，例如 `ap-northeast-1a` |
+| `EXCHANGE_AWS_AZ_ID` | 空 | AWS 可用区 ID，Extended 目标为 `apne1-az4` |
+| `EXCHANGE_AWS_SUBNET_ID` | 空 | 当前 EC2 所在子网 |
+| `EXCHANGE_AWS_VPC_ID` | 空 | 当前 EC2 所在 VPC |
 | `EXTENDED_MARKET` | `BTC-USD` | Extended 监控市场 |
 | `EXTENDED_REST_INTERVAL_SECONDS` | `1` | Extended REST RTT 请求间隔 |
 | `EXTENDED_TIMEOUT_SECONDS` | `5` | Extended HTTP/WS 超时基准秒数 |

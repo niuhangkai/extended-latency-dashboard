@@ -97,6 +97,71 @@ p {
   background: var(--red);
 }
 
+.placement-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(12, 18, 27, 0.9);
+  box-shadow: 0 12px 28px var(--shadow);
+  font-size: 13px;
+}
+
+.placement-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.placement-title {
+  font-weight: 700;
+}
+
+.placement-fields {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+}
+
+.placement-fields b {
+  color: var(--text);
+}
+
+.placement-target {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.placement-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-weight: 800;
+  color: #071015;
+}
+
+.placement-badge.same {
+  background: var(--green);
+}
+
+.placement-badge.different {
+  background: var(--red);
+  color: #fff;
+}
+
+.placement-badge.neutral {
+  background: var(--yellow);
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -270,8 +335,18 @@ th {
 
 @media (max-width: 1100px) {
   .cards,
-  .workspace {
+  .workspace,
+  .placement-bar {
     grid-template-columns: 1fr;
+  }
+
+  .placement-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .placement-target {
+    white-space: normal;
   }
 
   .chart-wrap,
