@@ -291,6 +291,7 @@ class ExchangeLatencyCollector:
                     ping_interval=None,
                     user_agent_header=EXTENDED_USER_AGENT,
                 ) as ws:
+                    last_msg_at = None
                     connect_ms = (time.perf_counter() - connect_t0) * 1000
                     await self._save_incident(
                         {

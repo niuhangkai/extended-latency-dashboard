@@ -33,12 +33,12 @@ const streamMeta = {
     note: "BBO 消息时间戳 lag",
   },
   extended_l2: {
-    name: "Extended L2",
-    note: "orderbook 消息间隔",
+    name: "Extended L2 消息间隔",
+    note: "orderbook 相邻消息间隔，不是网络 RTT",
   },
   extended_trades: {
-    name: "Extended 成交",
-    note: "publicTrades 消息间隔",
+    name: "Extended 公共成交消息间隔",
+    note: "publicTrades 相邻成交消息间隔，不是你的订单成交耗时",
   },
   extended_mark: {
     name: "Extended 标记价格",
