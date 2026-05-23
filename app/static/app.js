@@ -13,7 +13,8 @@ const colors = {
   extended_rest: "#f472b6",
   extended_bbo: "#34d399",
   extended_l2: "#60a5fa",
-  extended_trades: "#f97316",
+  extended_trades_payload_lag: "#f97316",
+  extended_trades_trade_age: "#fb7185",
   extended_mark: "#14b8a6",
   extended_index: "#e879f9",
   extended_order_place: "#a78bfa",
@@ -33,12 +34,16 @@ const streamMeta = {
     note: "BBO 消息时间戳 lag",
   },
   extended_l2: {
-    name: "Extended L2 消息间隔",
-    note: "orderbook 相邻消息间隔，不是网络 RTT",
+    name: "Extended L2 event_lag",
+    note: "orderbook 顶层 ts 到本机收到的延迟",
   },
-  extended_trades: {
-    name: "Extended 公共成交消息间隔",
-    note: "publicTrades 相邻成交消息间隔，不是你的订单成交耗时",
+  extended_trades_payload_lag: {
+    name: "Extended 成交 payload lag",
+    note: "publicTrades 顶层 ts 到本机收到的延迟",
+  },
+  extended_trades_trade_age: {
+    name: "Extended 成交 trade age",
+    note: "publicTrades data[].T 到本机收到的延迟",
   },
   extended_mark: {
     name: "Extended 标记价格",
@@ -80,6 +85,8 @@ const streamMeta = {
 
 const metricNames = {
   message_gap: "消息间隔",
+  payload_lag: "payload lag",
+  trade_age: "trade age",
   order_ack: "下单 ACK",
   cancel_ack: "撤单 ACK",
   order_ws_ack: "下单回报",
@@ -87,7 +94,7 @@ const metricNames = {
   fill_order_ack: "成交下单 ACK",
   fill_ws_ack: "成交回报",
   rest_rtt: "REST RTT",
-  event_lag: "消息 lag",
+  event_lag: "event_lag",
 };
 
 const severityNames = {
@@ -225,7 +232,8 @@ function renderActiveStreams(streams) {
     "extended_rest",
     "extended_bbo",
     "extended_l2",
-    "extended_trades",
+    "extended_trades_payload_lag",
+    "extended_trades_trade_age",
     "extended_mark",
     "extended_index",
     "extended_order_test",
@@ -261,7 +269,8 @@ function renderCards(items, activeStreams = []) {
     "extended_rest",
     "extended_bbo",
     "extended_l2",
-    "extended_trades",
+    "extended_trades_payload_lag",
+    "extended_trades_trade_age",
     "extended_mark",
     "extended_index",
     "extended_order_place",
@@ -356,7 +365,7 @@ function incidentText(item) {
     extended_rest_error: "Extended REST 失败",
     extended_order_error: "Extended 下单测试失败",
     extended_fill_error: "Extended 实际成交测试失败",
-    extended_lag_spike: "Extended 消息 lag 尖峰",
+    extended_lag_spike: "Extended 延迟尖峰",
     config_error: "配置错误",
     error: "连接错误",
   }[item.type] || item.type;
@@ -398,7 +407,7 @@ function incidentText(item) {
     return { title: `${stream} ${type}`, detail: item.message };
   }
   if (item.type === "extended_lag_spike") {
-    return { title: `${stream} ${type}`, detail: `最大消息 lag ${fmt(extra.max_ms, 2)} ms` };
+    return { title: `${stream} ${type}`, detail: `最大延迟 ${fmt(extra.max_ms, 2)} ms` };
   }
   if (item.type === "error") {
     return { title: `${stream} ${type}`, detail: item.message };

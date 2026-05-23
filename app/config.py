@@ -54,6 +54,9 @@ def load_settings() -> Settings:
         for item in os.getenv("EXCHANGE_STREAMS", DEFAULT_STREAMS).split(",")
         if item.strip()
     }
+    if "extended_trades" in streams:
+        streams.remove("extended_trades")
+        streams.update({"extended_trades_payload_lag", "extended_trades_trade_age"})
     if "extended_order_test" in streams:
         streams.update({"extended_order_place", "extended_order_cancel", "extended_order_ws"})
     if "extended_fill_test" in streams:

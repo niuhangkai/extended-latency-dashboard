@@ -116,17 +116,27 @@ class ExchangeLatencyCollector:
                     self._extended_ws_stream(
                         stream="extended_l2",
                         path=f"orderbooks/{quote(self.settings.extended_market)}",
-                        metric_type="message_gap",
+                        metric_type="event_lag",
                     )
                 )
             )
-        if "extended_trades" in self.settings.streams:
+        if "extended_trades_payload_lag" in self.settings.streams:
             self.tasks.append(
                 asyncio.create_task(
                     self._extended_ws_stream(
-                        stream="extended_trades",
+                        stream="extended_trades_payload_lag",
                         path=f"publicTrades/{quote(self.settings.extended_market)}",
-                        metric_type="message_gap",
+                        metric_type="payload_lag",
+                    )
+                )
+            )
+        if "extended_trades_trade_age" in self.settings.streams:
+            self.tasks.append(
+                asyncio.create_task(
+                    self._extended_ws_stream(
+                        stream="extended_trades_trade_age",
+                        path=f"publicTrades/{quote(self.settings.extended_market)}",
+                        metric_type="trade_age",
                     )
                 )
             )
@@ -171,18 +181,59 @@ class ExchangeLatencyCollector:
         row = self.storage.insert_incident(incident)
         await self.broadcast({"type": "incident", "data": row})
 
+    def _normalized_lag_ms(
+        self,
+        ts: int | float | str | None,
+        *,
+        max_age_ms: int | None = 600_000,
+    ) -> float | None:
+        if isinstance(ts, str):
+            try:
+                ts = float(ts)
+            except ValueError:
+                return None
+        if not isinstance(ts, (int, float)):
+            return None
+        value = float(ts)
+        if value < 10_000_000_000:
+            value *= 1000
+        lag = now_ms() - int(value)
+        if lag < 0:
+            return None
+        if max_age_ms is not None and lag > max_age_ms:
+            return None
+        return float(lag)
+
     def _extended_event_lag_ms(self, raw: str) -> float | None:
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
             return None
-        ts = payload.get("ts")
-        if not isinstance(ts, (int, float)):
-            return None
-        lag = now_ms() - int(ts)
-        if lag < 0 or lag > 600_000:
-            return None
-        return float(lag)
+        return self._normalized_lag_ms(payload.get("ts"))
+
+    def _extended_metric_values(self, raw: str, metric_type: str) -> list[float]:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if metric_type in {"event_lag", "payload_lag"}:
+            lag = self._normalized_lag_ms(payload.get("ts"))
+            return [lag] if lag is not None else []
+        if metric_type == "trade_age":
+            rows = payload.get("data")
+            if isinstance(rows, dict):
+                rows = [rows]
+            if not isinstance(rows, list):
+                return []
+            values = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                lag = self._normalized_lag_ms(row.get("T"), max_age_ms=7 * 24 * 60 * 60 * 1000)
+                if lag is not None:
+                    values.append(lag)
+            return values
+        return []
 
     async def _extended_rest_ping(self) -> None:
         stream = "extended_rest"
@@ -333,10 +384,11 @@ class ExchangeLatencyCollector:
                         window.messages += 1
                         window.bytes += len(raw)
 
-                        lag_ms = self._extended_event_lag_ms(raw) if metric_type == "event_lag" else None
-                        if metric_type == "event_lag" and lag_ms is not None:
-                            window.add_value(lag_ms)
-                        elif last_msg_at is not None:
+                        values = self._extended_metric_values(raw, metric_type)
+                        if values:
+                            for value in values:
+                                window.add_value(value)
+                        elif metric_type == "message_gap" and last_msg_at is not None:
                             window.add_value((current - last_msg_at) * 1000)
                         last_msg_at = current
 
@@ -355,7 +407,7 @@ class ExchangeLatencyCollector:
                                 **window.summary(),
                             }
                             await self._save_sample(sample)
-                            if sample.get("max_ms") and sample["max_ms"] > 1000:
+                            if metric_type in {"event_lag", "payload_lag", "rest_rtt"} and sample.get("max_ms") and sample["max_ms"] > 1000:
                                 await self._save_incident(
                                     {
                                         "ts_ms": now_ms(),
@@ -364,7 +416,7 @@ class ExchangeLatencyCollector:
                                         "symbol": self.settings.extended_market,
                                         "severity": "warning",
                                         "type": "extended_lag_spike",
-                                        "message": f"{stream} 最大消息 lag {sample['max_ms']:.2f} ms",
+                                        "message": f"{stream} 最大 {metric_type} {sample['max_ms']:.2f} ms",
                                         "extra": sample,
                                     }
                                 )

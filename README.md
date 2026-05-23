@@ -8,8 +8,9 @@
 | --- | --- | --- |
 | `extended_rest` | Extended 公共 REST | `GET /info/markets` RTT |
 | `extended_bbo` | Extended BBO | `orderbooks/{market}?depth=1` 消息时间戳 lag |
-| `extended_l2` | Extended L2 消息间隔 | `orderbooks/{market}` 相邻消息间隔，不是网络 RTT |
-| `extended_trades` | Extended 公共成交消息间隔 | `publicTrades/{market}` 相邻成交消息间隔，不是你的订单成交耗时 |
+| `extended_l2` | Extended L2 event_lag | `orderbooks/{market}` 顶层 `ts` 到本机收到的延迟 |
+| `extended_trades_payload_lag` | Extended 成交 payload lag | `publicTrades/{market}` 顶层 `ts` 到本机收到的延迟 |
+| `extended_trades_trade_age` | Extended 成交 trade age | `publicTrades/{market}` 内 `data[].T` 到本机收到的时间差，反映成交新旧程度，不作为网络延迟报警 |
 | `extended_mark` | Extended 标记价格 | `prices/mark/{market}` 消息时间戳 lag |
 | `extended_index` | Extended 指数价格 | `prices/index/{market}` 消息时间戳 lag |
 | `extended_order_place` | Extended 下单 ACK | 测试下单 REST ACK |
