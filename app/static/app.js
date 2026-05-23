@@ -179,6 +179,8 @@ function renderPlacement(placement) {
       : [
           ["Provider", provider],
           ["Region", placement?.region],
+          ["Private IP", placement?.private_ip],
+          ["Public IP", placement?.public_ip],
           ["说明", placement?.note],
         ];
 

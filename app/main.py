@@ -70,6 +70,8 @@ async def detect_placement() -> dict[str, Any]:
         return {
             "provider": "vultr",
             "region": settings.region,
+            "private_ip": os.getenv("EXCHANGE_PRIVATE_IP"),
+            "public_ip": os.getenv("EXCHANGE_PUBLIC_IP"),
             "az_match": "cross_cloud",
             "note": "Vultr 节点不属于 AWS AZ，不能和 Extended 做同 AZ 判定。",
         }
@@ -115,6 +117,8 @@ async def detect_placement() -> dict[str, Any]:
         return {
             "provider": "vultr",
             "region": settings.region,
+            "private_ip": os.getenv("EXCHANGE_PRIVATE_IP"),
+            "public_ip": os.getenv("EXCHANGE_PUBLIC_IP"),
             "az_match": "cross_cloud",
             "note": "Vultr 节点不属于 AWS AZ，不能和 Extended 做同 AZ 判定。",
         }
