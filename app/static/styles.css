@@ -361,7 +361,7 @@ button.active {
 
 .side {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   gap: 10px;
 }
 
@@ -389,8 +389,24 @@ th {
   font-weight: 600;
 }
 
+.stability-table {
+  font-size: 12px;
+}
+
+.stability-table th,
+.stability-table td {
+  padding: 7px 8px;
+}
+
+.stability-table small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .incidents {
-  height: calc(100vh - 456px);
+  height: calc(100vh - 650px);
   min-height: 260px;
   overflow: auto;
 }

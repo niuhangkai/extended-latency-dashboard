@@ -296,6 +296,32 @@ function renderSummary(items) {
     .join("");
 }
 
+function renderStability(items) {
+  const el = document.querySelector("#stabilityRows");
+  if (!el) return;
+  if (!items.length) {
+    el.innerHTML = `<tr><td colspan="6">暂无稳定性数据</td></tr>`;
+    return;
+  }
+  el.innerHTML = items
+    .map(
+      (item) => `
+      <tr>
+        <td>
+          <div>${streamName(item.stream)}</div>
+          <small>${item.stream}</small>
+        </td>
+        <td>${fmt(item.jitter_ms)}</td>
+        <td>${fmt(item.max_ms)}</td>
+        <td>${fmt(item.reconnects_per_hour, 2)}</td>
+        <td>${fmt(item.timeouts_per_hour, 2)}</td>
+        <td>${item.failure_events ?? 0}</td>
+      </tr>
+    `,
+    )
+    .join("");
+}
+
 function incidentText(item) {
   const stream = streamLabel(item.stream);
   const type = {
@@ -444,10 +470,11 @@ function buildChart(items) {
 
 async function refreshAll() {
   const query = rangeQuery();
-  const [status, series, summary, incidents] = await Promise.all([
+  const [status, series, summary, stability, incidents] = await Promise.all([
     getJson("/api/status"),
     getJson(`/api/series?${query}`),
     getJson(`/api/summary?${query}`),
+    getJson(`/api/stability?${query}`),
     getJson(`/api/incidents?${query}`),
   ]);
 
@@ -461,6 +488,7 @@ async function refreshAll() {
   renderCards(status.latest, state.streams);
   buildChart(series.items);
   renderSummary(summary.items);
+  renderStability(stability.items);
   renderIncidents(incidents.items);
 }
 

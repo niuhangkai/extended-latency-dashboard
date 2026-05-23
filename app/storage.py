@@ -278,3 +278,76 @@ class Storage:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def stability(self, since_ms: int, until_ms: int, streams: set[str] | None = None) -> list[dict[str, Any]]:
+        params: list[Any] = [since_ms, until_ms]
+        stream_filter = self._stream_filter(streams, params)
+        with self._lock:
+            sample_rows = self._conn.execute(
+                f"""
+                SELECT
+                    stream,
+                    metric_type,
+                    COUNT(*) AS windows,
+                    SUM(count) AS count,
+                    SUM(messages) AS messages,
+                    SUM(reconnects) AS reconnects,
+                    SUM(timeouts) AS timeouts,
+                    ROUND(AVG(p50_ms), 3) AS p50_ms,
+                    ROUND(AVG(p95_ms), 3) AS p95_ms,
+                    ROUND(MAX(max_ms), 3) AS max_ms,
+                    ROUND(MAX(max_ms) - AVG(p50_ms), 3) AS max_minus_p50_ms,
+                    ROUND(AVG(p95_ms) - AVG(p50_ms), 3) AS jitter_ms
+                FROM samples
+                WHERE ts_ms >= ? AND ts_ms <= ? {stream_filter}
+                GROUP BY stream, metric_type
+                """,
+                params,
+            ).fetchall()
+
+            incident_params: list[Any] = [since_ms, until_ms]
+            incident_filter = self._stream_filter(streams, incident_params)
+            incident_rows = self._conn.execute(
+                f"""
+                SELECT
+                    stream,
+                    SUM(CASE WHEN severity = 'error' THEN 1 ELSE 0 END) AS errors,
+                    SUM(CASE WHEN severity = 'warning' THEN 1 ELSE 0 END) AS warnings,
+                    SUM(CASE WHEN type = 'timeout' THEN 1 ELSE 0 END) AS timeout_events,
+                    SUM(CASE WHEN type = 'connect' THEN 1 ELSE 0 END) AS connect_events,
+                    SUM(CASE WHEN type IN ('error', 'extended_rest_error', 'extended_order_error', 'config_error') THEN 1 ELSE 0 END)
+                        AS failure_events
+                FROM incidents
+                WHERE ts_ms >= ? AND ts_ms <= ? {incident_filter}
+                GROUP BY stream
+                """,
+                incident_params,
+            ).fetchall()
+
+        incident_by_stream = {row["stream"]: dict(row) for row in incident_rows}
+        hours = max((until_ms - since_ms) / 3_600_000, 1 / 60)
+        result: list[dict[str, Any]] = []
+        for row in sample_rows:
+            item = dict(row)
+            incident = incident_by_stream.get(item["stream"], {})
+            errors = int(incident.get("errors") or 0)
+            warnings = int(incident.get("warnings") or 0)
+            failures = int(incident.get("failure_events") or 0)
+            messages = int(item.get("messages") or 0)
+            timeouts = int(item.get("timeouts") or 0)
+            reconnects = int(item.get("reconnects") or 0)
+            item.update(
+                {
+                    "errors": errors,
+                    "warnings": warnings,
+                    "timeout_events": int(incident.get("timeout_events") or 0),
+                    "connect_events": int(incident.get("connect_events") or 0),
+                    "failure_events": failures,
+                    "reconnects_per_hour": round(reconnects / hours, 3),
+                    "timeouts_per_hour": round(timeouts / hours, 3),
+                    "failures_per_hour": round(failures / hours, 3),
+                    "error_rate_pct": round(failures / max(messages, 1) * 100, 3),
+                }
+            )
+            result.append(item)
+        return sorted(result, key=lambda item: item["stream"])

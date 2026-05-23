@@ -265,6 +265,16 @@ async def incidents(
     return {"items": storage.incidents(start_ms, end_ms, settings.streams), "range": {"since_ms": start_ms, "until_ms": end_ms}}
 
 
+@app.get("/api/stability")
+async def stability(
+    minutes: int = 60,
+    since_ms: Optional[int] = None,
+    until_ms: Optional[int] = None,
+) -> dict[str, Any]:
+    start_ms, end_ms = resolve_range(minutes, since_ms, until_ms)
+    return {"items": storage.stability(start_ms, end_ms, settings.streams), "range": {"since_ms": start_ms, "until_ms": end_ms}}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
