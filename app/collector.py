@@ -47,12 +47,14 @@ class Window:
     values: list[float] = field(default_factory=list)
     messages: int = 0
     bytes: int = 0
+    reconnects: int = 0
     timeouts: int = 0
 
     def clear(self) -> None:
         self.values.clear()
         self.messages = 0
         self.bytes = 0
+        self.reconnects = 0
         self.timeouts = 0
 
     def add_value(self, value: float) -> None:
@@ -327,7 +329,7 @@ class ExchangeLatencyCollector:
                     pass
 
     async def _extended_ws_stream(self, *, stream: str, path: str, metric_type: str) -> None:
-        reconnects = 0
+        connect_attempts = 0
         window = Window()
         last_msg_at: float | None = None
         report_started_at = time.time()
@@ -335,7 +337,9 @@ class ExchangeLatencyCollector:
 
         while not self.stop_event.is_set():
             try:
-                reconnects += 1
+                connect_attempts += 1
+                if connect_attempts > 1:
+                    window.reconnects += 1
                 connect_t0 = time.perf_counter()
                 async with websockets.connect(
                     url,
@@ -402,7 +406,7 @@ class ExchangeLatencyCollector:
                                 "window_s": current - report_started_at,
                                 "messages": window.messages,
                                 "bytes": window.bytes,
-                                "reconnects": max(0, reconnects - 1),
+                                "reconnects": window.reconnects,
                                 "timeouts": window.timeouts,
                                 **window.summary(),
                             }

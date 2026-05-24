@@ -199,7 +199,7 @@ class Storage:
                         ROUND(MAX(max_ms), 3) AS max_ms,
                         SUM(messages) AS messages,
                         SUM(bytes) AS bytes,
-                        MAX(reconnects) AS reconnects,
+                        SUM(reconnects) AS reconnects,
                         SUM(timeouts) AS timeouts
                     FROM (
                         SELECT
@@ -245,7 +245,7 @@ class Storage:
                     ROUND(MAX(max_ms), 3) AS max_ms,
                     SUM(messages) AS messages,
                     SUM(bytes) AS bytes,
-                    MAX(reconnects) AS reconnects,
+                    SUM(reconnects) AS reconnects,
                     SUM(timeouts) AS timeouts
                 FROM samples
                 WHERE ts_ms >= ? AND ts_ms <= ? {stream_filter}
